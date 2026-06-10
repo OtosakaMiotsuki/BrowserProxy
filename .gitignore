@@ -33,3 +33,13 @@ Thumbs.db
 htmlcov/
 .pytest_cache/
 .cache/
+
+# 生成的文件
+*.txt
+*.crx
+*.pem
+*.p12
+
+# 打包输出
+BrowserProxy_*.zip
+BrowserProxy_*.crx
