@@ -33,6 +33,3 @@ Thumbs.db
 htmlcov/
 .pytest_cache/
 .cache/
-
-# Chrome 扩展
-extension/icons/*.png

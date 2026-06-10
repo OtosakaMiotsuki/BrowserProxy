@@ -24,3 +24,8 @@ packages = ["src/browserproxy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pillow>=12.2.0",
+]
