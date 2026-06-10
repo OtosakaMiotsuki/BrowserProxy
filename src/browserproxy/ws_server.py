@@ -157,7 +157,8 @@ class SyncWebSocketServer:
 
     def stop(self):
         """停止服务端"""
-        if self._loop:
+        if self._loop and self._loop.is_running():
+            # 安全地关闭事件循环
             self._loop.call_soon_threadsafe(self._loop.stop)
         if self._thread:
             self._thread.join(timeout=2)
