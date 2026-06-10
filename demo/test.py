@@ -51,7 +51,7 @@ def main():
             logger.info(f"找到百度标签页: {baidu_tab.title} (ID: {baidu_tab.tab_id})")
         else:
             logger.info("未找到百度标签页")
-
+        time.sleep(10)
     except TimeoutError as e:
         logger.error(f"等待超时: {e}")
     except Exception as e:
