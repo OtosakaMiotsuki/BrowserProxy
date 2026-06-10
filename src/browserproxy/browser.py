@@ -1,6 +1,5 @@
 """Browser 类模块"""
 
-import time
 from typing import List, Optional, Dict, Any
 from loguru import logger
 from .ws_server import SyncWebSocketServer
@@ -42,11 +41,8 @@ class Browser:
         logger.info("正在等待 Chrome 扩展连接...")
 
         # 等待扩展连接
-        start_time = time.time()
-        while not self._ws_server.connected:
-            if time.time() - start_time > timeout:
-                raise TimeoutError("等待 Chrome 扩展连接超时，请确保扩展已安装并输入了正确的端口号")
-            time.sleep(0.1)
+        if not self._ws_server.wait_for_connection(timeout):
+            raise TimeoutError("等待 Chrome 扩展连接超时，请确保扩展已安装并输入了正确的端口号")
 
         self.connected = True
         logger.info("Chrome 扩展已连接！")
