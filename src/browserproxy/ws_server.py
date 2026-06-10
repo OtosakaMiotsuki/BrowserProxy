@@ -9,7 +9,6 @@ import threading
 from typing import Any, Dict, Optional
 from loguru import logger
 import websockets
-from collections import defaultdict
 
 
 class WebSocketServer:
@@ -28,6 +27,8 @@ class WebSocketServer:
         self._response_queues: Dict[str, asyncio.Queue] = {}
         self._connected_event = asyncio.Event()
         self._lock = asyncio.Lock()
+        self._shutdown_event = asyncio.Event()
+        self._server: Optional[Any] = None
 
     @property
     def connected(self) -> bool:
@@ -113,9 +114,20 @@ class WebSocketServer:
         """启动服务端"""
         logger.info(f"WebSocket 服务端启动: ws://{self.host}:{self.port}")
 
-        async with websockets.serve(self._handler, self.host, self.port):
-            logger.info("等待 Chrome 扩展连接...")
-            await asyncio.Future()  # 永远运行
+        self._server = await websockets.serve(self._handler, self.host, self.port)
+        logger.info("等待 Chrome 扩展连接...")
+
+        # 等待关闭信号
+        await self._shutdown_event.wait()
+
+        # 关闭服务器
+        self._server.close()
+        await self._server.wait_closed()
+        logger.info("WebSocket 服务端已关闭")
+
+    def shutdown(self):
+        """触发关闭信号"""
+        self._shutdown_event.set()
 
 
 class SyncWebSocketServer:
@@ -157,11 +169,13 @@ class SyncWebSocketServer:
 
     def stop(self):
         """停止服务端"""
-        if self._loop and self._loop.is_running():
-            # 安全地关闭事件循环
-            self._loop.call_soon_threadsafe(self._loop.stop)
+        if self._server:
+            # 触发关闭信号
+            self._server.shutdown()
+
         if self._thread:
-            self._thread.join(timeout=2)
+            self._thread.join(timeout=3)
+
         logger.info("WebSocket 服务端已停止")
 
     def wait_for_connection(self, timeout: float = 30) -> bool:
