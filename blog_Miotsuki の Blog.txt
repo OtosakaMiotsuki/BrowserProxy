@@ -1,0 +1,178 @@
+标题: 
+    Miotsuki の Blog
+  
+==================================================
+
+
+    
+
+    
+      
+      
+    
+
+    
+      
+      
+    
+
+    
+      
+      
+    
+
+    
+      
+        文章共 789 字，阅读完预计需要  1 分钟 19 秒。文章篇幅适中，可以放心阅读。
+      
+      
+        
+      
+    
+      DS1302 实时时钟模块使用笔记
+
+使用 ESP32 开发板，Arduino 框架
+
+今天用了一下 DS1302 实时时钟模块，记录一下使用方法～
+DS1302 是什么
+DS1302 是一个实时时钟芯片，可以用来保存时间和日期。即使断电了，只要接上备用电池，时间也会继续走，不会丢失。
+引脚说明
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+引脚说明VCC接 3.3V 或 5VGND接地CLK时钟线（SCLK）DAT数据线（IO）RST复位/使能线（CE）
+接线的时候注意这三个信号线，代码里要对应好。
+使用方法
+我用的是 Rtc_by_Makuna 这个库，直接在 PlatformIO 的库管理器里搜一下就能装。
+接线：
+
+VCC 接 3.3V 或 5V
+GND 接地
+CLK 接 ESP32 的 GPIO 17
+DAT 接 ESP32 的 GPIO 16
+RST 接 ESP32 的 GPIO 4
+
+代码里用 ThreeWire 来初始化这三个引脚：
+ThreeWire myWire(16, 17, 4); // IO, SCLK, CERtcDS1302<ThreeWire> Rtc(myWire);
+设置时间
+DS1302 需要一个初始时间，我用的是编译时间来设置，这样每次烧录代码的时候时间会自动更新成编译时的时间。
+const RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);
+
+然后在 setup 里做一些检查：
+if (!Rtc.IsDateTimeValid()){    Serial.println("RTC lost confidence in the DateTime!");    Rtc.SetDateTime(compiled);} if (Rtc.GetIsWriteProtected()){    Serial.println("RTC was write protected, enabling writing now");    Rtc.SetIsWriteProtected(false);} if (!Rtc.GetIsRunning()){    Serial.println("RTC was not actively running, starting now");    Rtc.SetIsRunning(true);}
+还会比较一下 RTC 时间和编译时间，如果 RTC 时间比编译时间旧，就更新一下：
+RtcDateTime now = Rtc.GetDateTime(); if (now < compiled){    Serial.println("RTC is older than compile time!  (Updating DateTime)");    Rtc.SetDateTime(compiled);}
+读取时间
+在 loop 里读取时间很简单：
+RtcDateTime now = Rtc.GetDateTime(); char nowDateStr[26];snprintf(nowDateStr, 26, "%02u/%02u/%04u %02u:%02u:%02u",         now.Month(), now.Day(), now.Year(),         now.Hour(), now.Minute(), now.Second());Serial.println(nowDateStr); delay(1000);
+每秒打印一次当前时间，格式是 月/日/年 时:分:秒。
+完整代码
+//// Created by 25466 on 2026/5/2.// #include <Arduino.h>#include <RtcDS1302.h> ThreeWire myWire(16, 17, 4); // IO, SCLK, CERtcDS1302<ThreeWire> Rtc(myWire); void setup(){    Serial.begin(115200);     Serial.print("compiled: ");    Serial.println(__DATE__);    Serial.println(__TIME__);     Rtc.Begin();     // 直接用你创造的字符串构建 RTC 时间对象    const RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);     // --- 直接在此处打印编译时间，不调用额外函数 ---    char compiledDateStr[26];    snprintf(compiledDateStr, 26, "%02u/%02u/%04u %02u:%02u:%02u",             compiled.Month(), compiled.Day(), compiled.Year(),             compiled.Hour(), compiled.Minute(), compiled.Second());    Serial.println(compiledDateStr);    // -------------------------------------------     if (!Rtc.IsDateTimeValid())    {        Serial.println("RTC lost confidence in the DateTime!");        Rtc.SetDateTime(compiled);    }     if (Rtc.GetIsWriteProtected())    {        Serial.println("RTC was write protected, enabling writing now");        Rtc.SetIsWriteProtected(false);    }     if (!Rtc.GetIsRunning())    {        Serial.println("RTC was not actively running, starting now");        Rtc.SetIsRunning(true);    }     RtcDateTime now = Rtc.GetDateTime();     if (now < compiled)    {        Serial.println("RTC is older than compile time!  (Updating DateTime)");        Rtc.SetDateTime(compiled);    }    else if (now > compiled)    {        Serial.println("RTC is newer than compile time. (this is expected)");    }    else if (now == compiled)    {        Serial.println("RTC is the same as compile time! (not expected but all is fine)");    }} void loop(){    RtcDateTime now = Rtc.GetDateTime();     // --- 直接在此处打印当前 RTC 时间，不调用额外函数 ---    char nowDateStr[26];    snprintf(nowDateStr, 26, "%02u/%02u/%04u %02u:%02u:%02u",             now.Month(), now.Day(), now.Year(),             now.Hour(), now.Minute(), now.Second());    Serial.println(nowDateStr);    // ------------------------------------------------     if (!now.IsValid())    {        Serial.println("RTC lost confidence in the DateTime!");    }     delay(1000);}
+注意事项
+
+库的选择：用的是 Rtc_by_Makuna 这个库，功能比较全，支持 DS1302、DS3231 等多种 RTC 芯片
+接线顺序：ThreeWire 的参数顺序是 IO, SCLK, CE，别接反了
+编译时间设置：用 __DATE__ 和 __TIME__ 可以自动获取编译时间，不用手动设置
+备用电池：DS1302 可以接一个 CR2032 纽扣电池做备用电源，断电后时间不会丢
+写保护：如果发现时间设置不进去，检查一下是不是写保护了，用 SetIsWriteProtected(false) 关掉就行
+
+    
+
+    
+      
+        
+          Q.E.D.
+          
+        
+      
+
+      
+      
+        
+          
+            
+            知识共享署名-非商业性使用-相同方式共享 4.0 国际 (CC BY-NC-SA 4.0)
+          
+        
+        
+          
+            
+            esp32 arduino
+          
+        
+        
+  
+    
+      
+        
+          
+            
+          
+        
+        
+          
+            
+          
+        
+        
+          
+            
+              微信扫一扫：分享
+              
+              
+                微信里点“发现”，扫一下
+                二维码便可将本文分享至朋友圈。
+              
+            
+            
+          
+        
+        
+          
+            
+          
+        
+        
+          
+            
+          
+        
+        
+          
+            
+          
+        
+      
+      
+    
+  
+
+      
+    
+  
