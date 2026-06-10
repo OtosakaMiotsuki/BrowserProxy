@@ -1,9 +1,10 @@
 """
 BrowserProxy 测试程序
-打印所有标签页信息
+启动 WebSocket 服务端，等待 Chrome 扩展连接
 """
 
 import sys
+import time
 from loguru import logger
 from browserproxy import Browser
 
@@ -16,14 +17,14 @@ def main():
     """主函数"""
     logger.info("BrowserProxy 测试程序启动")
 
-    # 创建浏览器连接
-    browser = Browser()
+    # 创建浏览器连接（会启动 WebSocket 服务端）
+    browser = Browser(port=8765)
 
     try:
-        # 连接到 WebSocket 服务端
-        logger.info("正在连接到 WebSocket 服务端...")
-        browser.connect()
-        logger.info("连接成功！")
+        # 启动服务并等待扩展连接
+        logger.info("正在启动 WebSocket 服务端...")
+        logger.info("请在 Chrome 扩展中输入端口号 8765 并点击连接")
+        browser.connect(timeout=30)
 
         # 获取所有标签页
         logger.info("获取标签页列表...")
@@ -51,11 +52,8 @@ def main():
         else:
             logger.info("未找到百度标签页")
 
-    except ConnectionRefusedError:
-        logger.error("连接被拒绝！")
-        logger.info("请确保：")
-        logger.info("1. WebSocket 服务端已启动 (运行 server.py)")
-        logger.info("2. Chrome 扩展已安装并连接")
+    except TimeoutError as e:
+        logger.error(f"等待超时: {e}")
     except Exception as e:
         logger.error(f"发生错误: {e}")
     finally:

@@ -1,8 +1,9 @@
 """Browser 类模块"""
 
+import time
 from typing import List, Optional, Dict, Any
 from loguru import logger
-from .ws_client import WebSocketClient
+from .ws_server import SyncWebSocketServer
 from .tab import Tab
 from .match import TabMatcher
 
@@ -19,7 +20,7 @@ class Browser:
         """
         self.host = host
         self.port = port
-        self._ws_client = WebSocketClient(host, port)
+        self._ws_server = SyncWebSocketServer(host, port)
         self._tabs: List[Tab] = []
         self.connected = False
 
@@ -28,15 +29,31 @@ class Browser:
         """获取标签页列表"""
         return self._tabs
 
-    def connect(self) -> None:
-        """连接到浏览器扩展"""
-        self._ws_client.connect()
+    def connect(self, timeout: float = 30) -> None:
+        """启动服务并等待 Chrome 扩展连接
+
+        Args:
+            timeout: 等待扩展连接的超时时间（秒）
+
+        Raises:
+            TimeoutError: 等待超时
+        """
+        self._ws_server.start()
+        logger.info("正在等待 Chrome 扩展连接...")
+
+        # 等待扩展连接
+        start_time = time.time()
+        while not self._ws_server.connected:
+            if time.time() - start_time > timeout:
+                raise TimeoutError("等待 Chrome 扩展连接超时，请确保扩展已安装并输入了正确的端口号")
+            time.sleep(0.1)
+
         self.connected = True
-        logger.info("已连接到浏览器扩展")
+        logger.info("Chrome 扩展已连接！")
 
     def disconnect(self) -> None:
         """断开连接"""
-        self._ws_client.disconnect()
+        self._ws_server.stop()
         self.connected = False
         self._tabs = []
         logger.info("已断开连接")
@@ -50,7 +67,7 @@ class Browser:
         if not self.connected:
             raise ConnectionError("未连接到浏览器扩展")
 
-        response = self._ws_client.send_and_receive({
+        response = self._ws_server.send_and_receive({
             "action": "list_tabs"
         })
 
@@ -61,7 +78,7 @@ class Browser:
         for tab_data in response.get("data", []):
             tab = Tab(
                 tab_id=tab_data["id"],
-                ws_client=self._ws_client,
+                ws_server=self._ws_server,
                 url=tab_data.get("url", ""),
                 title=tab_data.get("title", "")
             )

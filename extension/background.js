@@ -1,28 +1,31 @@
 /**
  * BrowserProxy Chrome 扩展 - Service Worker
- * 维持 WebSocket 连接，接收 Python 脚本的指令
+ * 连接到 Python 程序的 WebSocket 服务端
  */
 
 // WebSocket 连接状态
 let ws = null;
 let connected = false;
+let currentPort = 8765;
 
 // 标签页信息缓存
 let tabsInfo = new Map();
 
 /**
- * 初始化 WebSocket 连接
+ * 连接到 WebSocket 服务端
  */
-function connectWebSocket() {
+function connectWebSocket(port = 8765) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     console.log('WebSocket 已连接');
     return;
   }
 
-  ws = new WebSocket('ws://localhost:8765');
+  currentPort = port;
+
+  ws = new WebSocket(`ws://localhost:${port}`);
 
   ws.onopen = () => {
-    console.log('WebSocket 连接成功');
+    console.log(`WebSocket 连接成功: ws://localhost:${port}`);
     // 注册为扩展客户端
     ws.send(JSON.stringify({ type: 'register', client_type: 'extension' }));
   };
@@ -51,8 +54,6 @@ function connectWebSocket() {
     console.log('WebSocket 连接关闭');
     connected = false;
     updateBadge(false);
-    // 尝试重连
-    setTimeout(connectWebSocket, 3000);
   };
 
   ws.onerror = (error) => {
@@ -60,6 +61,18 @@ function connectWebSocket() {
     connected = false;
     updateBadge(false);
   };
+}
+
+/**
+ * 断开 WebSocket 连接
+ */
+function disconnectWebSocket() {
+  if (ws) {
+    ws.close();
+    ws = null;
+  }
+  connected = false;
+  updateBadge(false);
 }
 
 /**
@@ -348,19 +361,14 @@ async function executeScript(tabId, script) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   switch (message.action) {
     case 'getStatus':
-      sendResponse({ connected });
+      sendResponse({ connected, port: currentPort });
       break;
     case 'connect':
-      connectWebSocket();
+      connectWebSocket(message.port);
       sendResponse({ success: true });
       break;
     case 'disconnect':
-      if (ws) {
-        ws.close();
-        ws = null;
-      }
-      connected = false;
-      updateBadge(false);
+      disconnectWebSocket();
       sendResponse({ success: true });
       break;
     default:
@@ -368,6 +376,3 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   return true; // 保持消息通道开放
 });
-
-// 启动时尝试连接
-connectWebSocket();

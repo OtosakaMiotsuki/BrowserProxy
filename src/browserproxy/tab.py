@@ -7,19 +7,19 @@ from loguru import logger
 class Tab:
     """标签页类，执行 DOM 操作"""
 
-    def __init__(self, tab_id: int, ws_client: Any, url: str = "", title: str = ""):
+    def __init__(self, tab_id: int, ws_server: Any, url: str = "", title: str = ""):
         """初始化标签页
 
         Args:
             tab_id: 标签页 ID
-            ws_client: WebSocket 客户端
+            ws_server: WebSocket 服务端
             url: 标签页 URL
             title: 标签页标题
         """
         self.tab_id = tab_id
         self.url = url
         self.title = title
-        self._ws_client = ws_client
+        self._ws_server = ws_server
 
     def _send_command(self, action: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """发送命令到标签页
@@ -36,7 +36,7 @@ class Tab:
             "action": action,
             "params": params or {}
         }
-        return self._ws_client.send_and_receive(command)
+        return self._ws_server.send_and_receive(command)
 
     def ele(self, selector: str) -> "Element":
         """获取元素
