@@ -36,6 +36,10 @@ class TestWebSocketClient:
     def test_connect_success(self, mock_ws_class):
         """测试连接成功"""
         mock_ws = MagicMock()
+        mock_ws.recv.return_value = json.dumps({
+            "type": "registered",
+            "success": True
+        })
         mock_ws_class.return_value = mock_ws
 
         client = WebSocketClient()
@@ -61,6 +65,10 @@ class TestWebSocketClient:
     def test_disconnect(self, mock_ws_class):
         """测试断开连接"""
         mock_ws = MagicMock()
+        mock_ws.recv.return_value = json.dumps({
+            "type": "registered",
+            "success": True
+        })
         mock_ws_class.return_value = mock_ws
 
         client = WebSocketClient()
@@ -74,6 +82,10 @@ class TestWebSocketClient:
     def test_send_command(self, mock_ws_class):
         """测试发送命令"""
         mock_ws = MagicMock()
+        mock_ws.recv.return_value = json.dumps({
+            "type": "registered",
+            "success": True
+        })
         mock_ws_class.return_value = mock_ws
 
         client = WebSocketClient()
@@ -88,8 +100,9 @@ class TestWebSocketClient:
 
         client.send(command)
 
-        mock_ws.send.assert_called_once()
-        sent_data = json.loads(mock_ws.send.call_args[0][0])
+        # 第二次 send 才是真正的命令（第一次是注册）
+        assert mock_ws.send.call_count == 2
+        sent_data = json.loads(mock_ws.send.call_args_list[1][0][0])
         assert sent_data["id"] == "req-001"
         assert sent_data["action"] == "click"
 
@@ -106,11 +119,11 @@ class TestWebSocketClient:
     def test_receive_response(self, mock_ws_class):
         """测试接收响应"""
         mock_ws = MagicMock()
-        mock_ws.recv.return_value = json.dumps({
-            "id": "req-001",
-            "success": True,
-            "data": None
-        })
+        # 第一次 recv 是注册响应
+        mock_ws.recv.side_effect = [
+            json.dumps({"type": "registered", "success": True}),
+            json.dumps({"id": "req-001", "success": True, "data": None})
+        ]
         mock_ws_class.return_value = mock_ws
 
         client = WebSocketClient()
@@ -125,11 +138,11 @@ class TestWebSocketClient:
     def test_send_and_receive(self, mock_ws_class):
         """测试发送命令并接收响应"""
         mock_ws = MagicMock()
-        mock_ws.recv.return_value = json.dumps({
-            "id": "req-001",
-            "success": True,
-            "data": {"title": "百度一下"}
-        })
+        # 第一次 recv 是注册响应
+        mock_ws.recv.side_effect = [
+            json.dumps({"type": "registered", "success": True}),
+            json.dumps({"id": "req-001", "success": True, "data": {"title": "百度一下"}})
+        ]
         mock_ws_class.return_value = mock_ws
 
         client = WebSocketClient()
@@ -151,11 +164,11 @@ class TestWebSocketClient:
     def test_receive_event(self, mock_ws_class):
         """测试接收事件推送"""
         mock_ws = MagicMock()
-        mock_ws.recv.return_value = json.dumps({
-            "event": "page_loaded",
-            "tab_id": 123,
-            "url": "https://example.com"
-        })
+        # 第一次 recv 是注册响应
+        mock_ws.recv.side_effect = [
+            json.dumps({"type": "registered", "success": True}),
+            json.dumps({"event": "page_loaded", "tab_id": 123, "url": "https://example.com"})
+        ]
         mock_ws_class.return_value = mock_ws
 
         client = WebSocketClient()

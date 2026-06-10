@@ -31,8 +31,18 @@ class WebSocketClient:
         try:
             self._ws = websocket.WebSocket()
             self._ws.connect(self.url)
-            self.connected = True
-            logger.info(f"已连接到 {self.url}")
+
+            # 注册为 Python 客户端
+            self._ws.send(json.dumps({"type": "register", "client_type": "python"}))
+
+            # 等待注册响应
+            response = json.loads(self._ws.recv())
+            if response.get("type") == "registered" and response.get("success"):
+                self.connected = True
+                logger.info(f"已连接到 {self.url}")
+            else:
+                raise Exception("注册失败")
+
         except Exception as e:
             self.connected = False
             logger.error(f"连接失败: {e}")

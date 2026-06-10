@@ -7,6 +7,7 @@ requires-python = ">=3.10"
 dependencies = [
     "websocket-client>=1.6.0",
     "loguru>=0.7.0",
+    "websockets>=16.0",
 ]
 
 [project.optional-dependencies]

@@ -23,13 +23,24 @@ function connectWebSocket() {
 
   ws.onopen = () => {
     console.log('WebSocket 连接成功');
-    connected = true;
-    updateBadge(true);
+    // 注册为扩展客户端
+    ws.send(JSON.stringify({ type: 'register', client_type: 'extension' }));
   };
 
   ws.onmessage = (event) => {
     try {
       const message = JSON.parse(event.data);
+
+      // 处理注册响应
+      if (message.type === 'registered') {
+        if (message.success) {
+          connected = true;
+          updateBadge(true);
+          console.log('注册成功');
+        }
+        return;
+      }
+
       handleMessage(message);
     } catch (e) {
       console.error('解析消息失败:', e);
