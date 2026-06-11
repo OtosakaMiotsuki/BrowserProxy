@@ -28,5 +28,6 @@ testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
+    "drissionpage>=4.1.1.4",
     "pillow>=12.2.0",
 ]
