@@ -43,3 +43,9 @@ htmlcov/
 # 打包输出
 BrowserProxy_*.zip
 BrowserProxy_*.crx
+
+# 测试场景（本地测试用，不提交）
+demo/douban_test/
+demo/form_test/
+demo/advanced_test/
+demo/movies.json
