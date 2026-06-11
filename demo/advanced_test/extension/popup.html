@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      width: 300px;
+      padding: 15px;
+      font-family: 'Microsoft YaHei', Arial, sans-serif;
+    }
+    h1 {
+      font-size: 18px;
+      margin: 0 0 15px 0;
+      color: #333;
+    }
+    .status {
+      padding: 10px;
+      border-radius: 5px;
+      margin-bottom: 15px;
+      text-align: center;
+      font-weight: bold;
+    }
+    .status.connected {
+      background-color: #e8f5e9;
+      color: #2e7d32;
+    }
+    .status.disconnected {
+      background-color: #ffebee;
+      color: #c62828;
+    }
+    .input-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      color: #666;
+      font-size: 12px;
+    }
+    input[type="number"] {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    button {
+      width: 100%;
+      padding: 10px;
+      font-size: 14px;
+      cursor: pointer;
+      border: none;
+      border-radius: 5px;
+      margin-bottom: 10px;
+    }
+    #connectBtn {
+      background-color: #2196F3;
+      color: white;
+    }
+    #connectBtn:hover {
+      background-color: #1976D2;
+    }
+    #disconnectBtn {
+      background-color: #f44336;
+      color: white;
+    }
+    #disconnectBtn:hover {
+      background-color: #d32f2f;
+    }
+    #disconnectBtn:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+<body>
+  <h1>BrowserProxy</h1>
+  <div id="status" class="status disconnected">未连接</div>
+
+  <div class="input-group">
+    <label for="portInput">WebSocket 端口</label>
+    <input type="number" id="portInput" value="8765" min="1024" max="65535">
+  </div>
+
+  <button id="connectBtn">连接</button>
+  <button id="disconnectBtn" disabled>断开</button>
+
+  <script src="popup.js"></script>
+</body>
+</html>
