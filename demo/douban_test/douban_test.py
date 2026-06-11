@@ -1,6 +1,6 @@
 """
 豆瓣 Top250 测试
-测试：滚动、翻页、获取电影信息
+测试：滚动、翻页、获取电影信息、关闭标签页
 """
 
 import sys
@@ -39,24 +39,21 @@ def main():
         })
 
         all_movies = []
+        tab_id = tab.tab_id
 
         # 获取 3 页数据
         for page in range(3):
-            logger.info(f"\n{'='*50}")
-            logger.info(f"第 {page+1} 页")
-            logger.info(f"{'='*50}")
+            logger.info(f"\n第 {page+1} 页")
 
             # 滚动到底部
-            logger.info("滚动到底部...")
             tab.scroll_to_bottom()
             time.sleep(1)
 
             # 获取电影信息
-            logger.info("获取电影信息...")
             items = tab.eles(".item")
             logger.info(f"找到 {len(items)} 部电影")
 
-            for item in items[:5]:
+            for item in items:
                 try:
                     title = item.ele(".hd a span").text
                     rating = item.ele(".rating_num").text
@@ -67,9 +64,15 @@ def main():
                         "rating": rating,
                         "votes": votes
                     })
-                    logger.info(f"  - {title} | {rating} | {votes}")
-                except Exception as e:
-                    logger.debug(f"获取电影详情失败: {e}")
+                except Exception:
+                    continue
+
+            # 每页获取完就保存一次（防止中途出错丢数据）
+            output = Path(__file__).parent / "movies.json"
+            with open(output, "w", encoding="utf-8") as f:
+                json.dump(all_movies, f, ensure_ascii=False, indent=2)
+
+            logger.info(f"已保存 {len(all_movies)} 部电影")
 
             # 点击下一页
             if page < 2:
@@ -77,17 +80,16 @@ def main():
                 if next_btn.exists():
                     next_btn.click()
                     time.sleep(2)
-                    logger.info("已翻到下一页")
                 else:
-                    logger.warning("没有下一页了")
+                    logger.info("没有下一页了")
                     break
 
-        # 保存结果
-        output = Path(__file__).parent / "movies.json"
-        with open(output, "w", encoding="utf-8") as f:
-            json.dump(all_movies, f, ensure_ascii=False, indent=2)
+        logger.info(f"\n完成！共 {len(all_movies)} 部电影")
 
-        logger.info(f"\n完成！共 {len(all_movies)} 部电影，已保存到 {output}")
+        # 关闭标签页
+        logger.info("关闭豆瓣标签页...")
+        browser.close_tab(tab_id)
+        logger.info("标签页已关闭")
 
     except Exception as e:
         logger.error(f"错误: {e}")
