@@ -355,6 +355,33 @@ async function handleMessage(message) {
         result = await executeOnTab(tab_id, 'deleteSessionStorage', params);
         break;
 
+      // ========== iframe 操作 ==========
+      case 'get_iframes':
+        result = await executeOnTab(tab_id, 'getIframes', params);
+        break;
+
+      case 'get_iframe_content':
+        result = await getIframeContent(tab_id, params);
+        break;
+
+      // ========== 截图 ==========
+      case 'screenshot':
+        result = await takeScreenshot(tab_id, params);
+        break;
+
+      case 'screenshot_element':
+        result = await screenshotElement(tab_id, params);
+        break;
+
+      // ========== 拖拽 ==========
+      case 'drag':
+        result = await executeOnTab(tab_id, 'drag', params);
+        break;
+
+      case 'drag_to':
+        result = await executeOnTab(tab_id, 'dragTo', params);
+        break;
+
       case 'wait_for_element':
         result = await executeOnTab(tab_id, 'waitForElement', params);
         break;
@@ -1207,19 +1234,124 @@ function executeDOMAction(action, params) {
           return { success: true };
         }
 
+      // ========== iframe 操作 ==========
+
+      case 'getIframes':
+        // 获取所有 iframe
+        {
+          const iframes = document.querySelectorAll('iframe');
+          const iframeList = Array.from(iframes).map((iframe, index) => ({
+            index: index,
+            src: iframe.src || '',
+            name: iframe.name || '',
+            id: iframe.id || '',
+            className: iframe.className || '',
+            width: iframe.width || iframe.offsetWidth,
+            height: iframe.height || iframe.offsetHeight
+          }));
+          return { success: true, data: iframeList };
+        }
+
+      // ========== 拖拽 ==========
+
+      case 'drag':
+        // 拖拽元素
+        if (!element) return { success: false, error: `元素不存在: ${selector}` };
+        {
+          const deltaX = params.deltaX || 100;
+          const deltaY = params.deltaY || 100;
+
+          const rect = element.getBoundingClientRect();
+          const startX = rect.left + rect.width / 2;
+          const startY = rect.top + rect.height / 2;
+
+          // 触发 mousedown
+          element.dispatchEvent(new MouseEvent('mousedown', {
+            bubbles: true, clientX: startX, clientY: startY, button: 0
+          }));
+
+          // 模拟拖动过程
+          const steps = 10;
+          for (let i = 1; i <= steps; i++) {
+            const currentX = startX + (deltaX * i / steps);
+            const currentY = startY + (deltaY * i / steps);
+
+            document.dispatchEvent(new MouseEvent('mousemove', {
+              bubbles: true, clientX: currentX, clientY: currentY, button: 0
+            }));
+          }
+
+          // 触发 mouseup
+          document.dispatchEvent(new MouseEvent('mouseup', {
+            bubbles: true, clientX: startX + deltaX, clientY: startY + deltaY, button: 0
+          }));
+
+          return { success: true };
+        }
+
+      case 'dragTo':
+        // 拖拽元素到目标位置
+        if (!element) return { success: false, error: `元素不存在: ${selector}` };
+        {
+          const toSelector = params.to;
+          let targetElement = null;
+
+          if (toSelector.startsWith('//') || toSelector.startsWith('(')) {
+            const result = document.evaluate(toSelector, document, null,
+              XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+            targetElement = result.singleNodeValue;
+          } else {
+            targetElement = document.querySelector(toSelector);
+          }
+
+          if (!targetElement) return { success: false, error: `目标元素不存在: ${toSelector}` };
+
+          const fromRect = element.getBoundingClientRect();
+          const toRect = targetElement.getBoundingClientRect();
+
+          const startX = fromRect.left + fromRect.width / 2;
+          const startY = fromRect.top + fromRect.height / 2;
+          const endX = toRect.left + toRect.width / 2;
+          const endY = toRect.top + toRect.height / 2;
+
+          // 触发 mousedown
+          element.dispatchEvent(new MouseEvent('mousedown', {
+            bubbles: true, clientX: startX, clientY: startY, button: 0
+          }));
+
+          // 模拟拖动过程
+          const steps = 10;
+          for (let i = 1; i <= steps; i++) {
+            const currentX = startX + ((endX - startX) * i / steps);
+            const currentY = startY + ((endY - startY) * i / steps);
+            document.dispatchEvent(new MouseEvent('mousemove', {
+              bubbles: true, clientX: currentX, clientY: currentY, button: 0
+            }));
+          }
+
+          // 触发 mouseup
+          document.dispatchEvent(new MouseEvent('mouseup', {
+            bubbles: true, clientX: endX, clientY: endY, button: 0
+          }));
+
+          return { success: true };
+        }
+
       // ========== 截图 ==========
 
       case 'screenshot':
-        // 截图（通过 html2canvas 或手动实现）
-        // 注意：这个需要注入 html2canvas 库，或者使用 canvas API
-        // 简单实现：返回页面的基本信息
+        // 返回截图所需的信息，实际截图通过 chrome.tabs.captureVisibleTab
         return {
           success: true,
           data: {
             url: window.location.href,
             title: document.title,
-            width: document.documentElement.scrollWidth,
-            height: document.documentElement.scrollHeight
+            width: window.innerWidth,
+            height: window.innerHeight,
+            scrollWidth: document.documentElement.scrollWidth,
+            scrollHeight: document.documentElement.scrollHeight,
+            scrollX: window.scrollX,
+            scrollY: window.scrollY
           }
         };
 
@@ -1248,6 +1380,124 @@ function executeDOMAction(action, params) {
       default:
         return { success: false, error: `未知 DOM 操作: ${action}` };
     }
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+// ========== 独立函数 ==========
+
+/**
+ * 获取 iframe 内容（需要注入到 iframe 中）
+ */
+async function getIframeContent(tabId, params) {
+  try {
+    const { iframeSelector } = params;
+
+    // 先找到 iframe 的 index
+    const iframeResults = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (sel) => {
+        let iframe = null;
+        if (sel.startsWith('//') || sel.startsWith('(')) {
+          const result = document.evaluate(sel, document, null,
+            XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+          iframe = result.singleNodeValue;
+        } else {
+          iframe = document.querySelector(sel);
+        }
+
+        if (!iframe || iframe.tagName.toLowerCase() !== 'iframe') {
+          return { success: false, error: `iframe 不存在: ${sel}` };
+        }
+
+        // 获取 iframe 在页面中的信息
+        return {
+          success: true,
+          data: {
+            src: iframe.src,
+            name: iframe.name,
+            id: iframe.id
+          }
+        };
+      },
+      args: [iframeSelector]
+    });
+
+    if (iframeResults && iframeResults[0]) {
+      return iframeResults[0].result;
+    }
+    return { success: false, error: '获取 iframe 信息失败' };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * 截图
+ */
+async function takeScreenshot(tabId, params) {
+  try {
+    // 使用 Chrome API 截图
+    const format = params.format || 'png';
+    const quality = params.quality || 100;
+
+    const dataUrl = await chrome.tabs.captureVisibleTab(null, {
+      format: format,
+      quality: quality
+    });
+
+    return {
+      success: true,
+      data: {
+        dataUrl: dataUrl,
+        format: format
+      }
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * 元素截图（通过 canvas 实现）
+ */
+async function screenshotElement(tabId, params) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (sel) => {
+        let element = null;
+        if (sel.startsWith('//') || sel.startsWith('(')) {
+          const result = document.evaluate(sel, document, null,
+            XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+          element = result.singleNodeValue;
+        } else {
+          element = document.querySelector(sel);
+        }
+
+        if (!element) {
+          return { success: false, error: `元素不存在: ${sel}` };
+        }
+
+        const rect = element.getBoundingClientRect();
+        return {
+          success: true,
+          data: {
+            x: Math.round(rect.x),
+            y: Math.round(rect.y),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height)
+          }
+        };
+      },
+      args: [params.selector]
+    });
+
+    if (results && results[0]) {
+      return results[0].result;
+    }
+    return { success: false, error: '获取元素位置失败' };
   } catch (error) {
     return { success: false, error: error.message };
   }

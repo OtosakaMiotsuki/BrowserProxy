@@ -399,6 +399,89 @@ class Tab:
         logger.debug(f"删除 sessionStorage: {key}")
         self._send_command("delete_session_storage", {"key": key})
 
+    # ========== iframe 操作 ==========
+
+    def get_iframes(self) -> List[Dict[str, Any]]:
+        """获取所有 iframe
+
+        Returns:
+            iframe 列表
+        """
+        logger.debug("获取所有 iframe")
+        response = self._send_command("get_iframes")
+        if response.get("success"):
+            return response.get("data", [])
+        raise Exception(f"获取 iframe 失败: {response.get('error')}")
+
+    def get_iframe_content(self, iframe_selector: str) -> Dict[str, Any]:
+        """获取 iframe 信息
+
+        Args:
+            iframe_selector: iframe 选择器
+
+        Returns:
+            iframe 信息
+        """
+        logger.debug(f"获取 iframe 信息: {iframe_selector}")
+        response = self._send_command("get_iframe_content", {
+            "iframeSelector": iframe_selector
+        })
+        if response.get("success"):
+            return response.get("data", {})
+        raise Exception(f"获取 iframe 信息失败: {response.get('error')}")
+
+    # ========== 截图 ==========
+
+    def screenshot(self, save_path: str = None, format: str = "png") -> str:
+        """截取当前页面
+
+        Args:
+            save_path: 保存路径，为 None 时返回 base64 数据
+            format: 图片格式 (png/jpeg)
+
+        Returns:
+            base64 数据或保存路径
+        """
+        logger.debug(f"截图: format={format}")
+        response = self._send_command("screenshot", {"format": format})
+        if response.get("success"):
+            data = response.get("data", {})
+            data_url = data.get("dataUrl", "")
+
+            if save_path:
+                # 保存到文件
+                import base64
+                import os
+
+                # 移除 data:image/xxx;base64, 前缀
+                if "," in data_url:
+                    data_url = data_url.split(",", 1)[1]
+
+                # 解码并保存
+                image_data = base64.b64decode(data_url)
+                with open(save_path, "wb") as f:
+                    f.write(image_data)
+                logger.info(f"截图已保存: {save_path}")
+                return save_path
+            else:
+                return data_url
+        raise Exception(f"截图失败: {response.get('error')}")
+
+    def screenshot_element(self, selector: str) -> Dict[str, int]:
+        """获取元素位置信息（用于裁剪截图）
+
+        Args:
+            selector: 元素选择器
+
+        Returns:
+            元素位置信息 {x, y, width, height}
+        """
+        logger.debug(f"获取元素截图位置: {selector}")
+        response = self._send_command("screenshot_element", {"selector": selector})
+        if response.get("success"):
+            return response.get("data", {})
+        raise Exception(f"获取元素位置失败: {response.get('error')}")
+
     # ========== JavaScript ==========
 
     def run_js(self, script: str) -> Any:
@@ -583,6 +666,27 @@ class Element:
         """取消勾选复选框"""
         logger.debug(f"取消勾选: {self._selector}")
         self._send_command("uncheck")
+
+    # ========== 拖拽 ==========
+
+    def drag(self, delta_x: int = 100, delta_y: int = 100) -> None:
+        """拖拽元素
+
+        Args:
+            delta_x: X 轴移动距离
+            delta_y: Y 轴移动距离
+        """
+        logger.debug(f"拖拽元素: {self._selector} -> ({delta_x}, {delta_y})")
+        self._send_command("drag", {"deltaX": delta_x, "deltaY": delta_y})
+
+    def drag_to(self, target_selector: str) -> None:
+        """拖拽元素到目标元素
+
+        Args:
+            target_selector: 目标元素选择器
+        """
+        logger.debug(f"拖拽到: {self._selector} -> {target_selector}")
+        self._send_command("drag_to", {"to": target_selector})
 
     # ========== 键盘操作 ==========
 
