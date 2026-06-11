@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BrowserProxy 表单测试</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+        h1 { color: #333; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, select, textarea { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+        .radio-group, .checkbox-group { display: flex; gap: 20px; }
+        .radio-group label, .checkbox-group label { display: inline; font-weight: normal; }
+        button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        button:hover { background: #45a049; }
+        #result { margin-top: 20px; padding: 15px; background: #f0f0f0; border-radius: 4px; display: none; }
+        #result h3 { margin-top: 0; color: #4CAF50; }
+    </style>
+</head>
+<body>
+    <h1>BrowserProxy 表单测试</h1>
+    <p>此页面用于测试 BrowserProxy 的表单填写功能</p>
+
+    <form id="testForm">
+        <div class="form-group">
+            <label for="username">用户名：</label>
+            <input type="text" id="username" name="username" placeholder="请输入用户名">
+        </div>
+
+        <div class="form-group">
+            <label for="email">邮箱：</label>
+            <input type="email" id="email" name="email" placeholder="请输入邮箱">
+        </div>
+
+        <div class="form-group">
+            <label for="password">密码：</label>
+            <input type="password" id="password" name="password" placeholder="请输入密码">
+        </div>
+
+        <div class="form-group">
+            <label for="age">年龄：</label>
+            <input type="number" id="age" name="age" min="1" max="150">
+        </div>
+
+        <div class="form-group">
+            <label for="gender">性别：</label>
+            <div class="radio-group">
+                <label><input type="radio" name="gender" value="male"> 男</label>
+                <label><input type="radio" name="gender" value="female"> 女</label>
+                <label><input type="radio" name="gender" value="other"> 其他</label>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="city">城市：</label>
+            <select id="city" name="city">
+                <option value="">请选择</option>
+                <option value="beijing">北京</option>
+                <option value="shanghai">上海</option>
+                <option value="guangzhou">广州</option>
+                <option value="shenzhen">深圳</option>
+                <option value="hangzhou">杭州</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label>兴趣爱好：</label>
+            <div class="checkbox-group">
+                <label><input type="checkbox" name="hobby" value="reading"> 阅读</label>
+                <label><input type="checkbox" name="hobby" value="gaming"> 游戏</label>
+                <label><input type="checkbox" name="hobby" value="coding"> 编程</label>
+                <label><input type="checkbox" name="hobby" value="travel"> 旅行</label>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="bio">个人简介：</label>
+            <textarea id="bio" name="bio" rows="4" placeholder="请简单介绍自己"></textarea>
+        </div>
+
+        <div class="form-group">
+            <label>
+                <input type="checkbox" id="agree" name="agree"> 我同意服务条款
+            </label>
+        </div>
+
+        <button type="button" id="submitBtn" onclick="submitForm()">提交</button>
+    </form>
+
+    <div id="result">
+        <h3>✅ 表单已填写！</h3>
+        <pre id="formData"></pre>
+    </div>
+
+    <script>
+        function submitForm() {
+            const form = document.getElementById('testForm');
+            const formData = new FormData(form);
+            const data = {};
+            for (let [key, value] of formData.entries()) {
+                if (data[key]) {
+                    if (Array.isArray(data[key])) {
+                        data[key].push(value);
+                    } else {
+                        data[key] = [data[key], value];
+                    }
+                } else {
+                    data[key] = value;
+                }
+            }
+            document.getElementById('formData').textContent = JSON.stringify(data, null, 2);
+            document.getElementById('result').style.display = 'block';
+        }
+    </script>
+</body>
+</html>
