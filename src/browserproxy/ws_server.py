@@ -1,12 +1,14 @@
 """
 BrowserProxy WebSocket 服务端
 Python 程序启动服务端，Chrome 扩展连接进来
+支持断线重连和心跳机制
 """
 
 import asyncio
 import json
 import threading
-from typing import Any, Dict, Optional
+import time
+from typing import Any, Callable, Dict, Optional
 from loguru import logger
 import websockets
 
@@ -30,10 +32,32 @@ class WebSocketServer:
         self._shutdown_event = asyncio.Event()
         self._server: Optional[Any] = None
 
+        # 心跳和重连
+        self._heartbeat_interval = 5  # 秒
+        self._last_heartbeat = 0
+        self._heartbeat_task: Optional[asyncio.Task] = None
+        self._on_disconnect: Optional[Callable] = None
+        self._on_reconnect: Optional[Callable] = None
+
     @property
     def connected(self) -> bool:
         """是否有扩展连接"""
         return self.extension_ws is not None
+
+    @property
+    def time_since_last_heartbeat(self) -> float:
+        """距离上次心跳的时间（秒）"""
+        if self._last_heartbeat == 0:
+            return float('inf')
+        return time.time() - self._last_heartbeat
+
+    def on_disconnect(self, callback: Callable):
+        """注册断开连接回调"""
+        self._on_disconnect = callback
+
+    def on_reconnect(self, callback: Callable):
+        """注册重新连接回调"""
+        self._on_reconnect = callback
 
     async def _handler(self, websocket: Any):
         """处理新的 WebSocket 连接"""
@@ -41,12 +65,28 @@ class WebSocketServer:
             async for message in websocket:
                 data = json.loads(message)
 
+                # 心跳响应
+                if data.get("type") == "heartbeat":
+                    self._last_heartbeat = time.time()
+                    await websocket.send(json.dumps({"type": "heartbeat_ack"}))
+                    continue
+
                 # Chrome 扩展注册
                 if data.get("type") == "register":
+                    was_connected = self.extension_ws is not None
                     self.extension_ws = websocket
                     self._connected_event.set()
+                    self._last_heartbeat = time.time()
+
                     logger.info("Chrome 扩展已连接")
                     await websocket.send(json.dumps({"type": "registered", "success": True}))
+
+                    # 如果是重连，触发回调
+                    if was_connected and self._on_reconnect:
+                        try:
+                            self._on_reconnect()
+                        except Exception as e:
+                            logger.error(f"重连回调执行失败: {e}")
                     continue
 
                 # 处理响应消息
@@ -58,6 +98,28 @@ class WebSocketServer:
             logger.info("Chrome 扩展断开连接")
             self.extension_ws = None
             self._connected_event.clear()
+
+            # 触发断开回调
+            if self._on_disconnect:
+                try:
+                    self._on_disconnect()
+                except Exception as e:
+                    logger.error(f"断开回调执行失败: {e}")
+
+    async def _heartbeat_loop(self):
+        """心跳检测循环"""
+        while not self._shutdown_event.is_set():
+            try:
+                await asyncio.sleep(self._heartbeat_interval)
+
+                if self.extension_ws and self.time_since_last_heartbeat > self._heartbeat_interval * 3:
+                    logger.warning("心跳超时，扩展可能已断开")
+                    # 不主动断开，等待扩展重连
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"心跳检测异常: {e}")
 
     async def wait_for_connection(self, timeout: float = 30) -> bool:
         """等待扩展连接
@@ -74,11 +136,12 @@ class WebSocketServer:
         except asyncio.TimeoutError:
             return False
 
-    async def send_command(self, command: Dict[str, Any]) -> Dict[str, Any]:
+    async def send_command(self, command: Dict[str, Any], timeout: float = 10) -> Dict[str, Any]:
         """发送命令到 Chrome 扩展
 
         Args:
             command: 命令字典
+            timeout: 超时时间（秒）
 
         Returns:
             响应字典
@@ -101,7 +164,7 @@ class WebSocketServer:
 
             # 等待响应（带超时）
             try:
-                response = await asyncio.wait_for(queue.get(), timeout=10)
+                response = await asyncio.wait_for(queue.get(), timeout=timeout)
                 return response
             except asyncio.TimeoutError:
                 raise TimeoutError(f"命令执行超时: {command.get('action')}")
@@ -117,8 +180,19 @@ class WebSocketServer:
         self._server = await websockets.serve(self._handler, self.host, self.port)
         logger.info("等待 Chrome 扩展连接...")
 
+        # 启动心跳检测
+        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+
         # 等待关闭信号
         await self._shutdown_event.wait()
+
+        # 停止心跳
+        if self._heartbeat_task:
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
 
         # 关闭服务器
         self._server.close()
@@ -170,7 +244,6 @@ class SyncWebSocketServer:
     def stop(self):
         """停止服务端"""
         if self._server:
-            # 触发关闭信号
             self._server.shutdown()
 
         if self._thread:
@@ -196,11 +269,12 @@ class SyncWebSocketServer:
         )
         return future.result(timeout=timeout + 1)
 
-    def send_and_receive(self, command: Dict[str, Any]) -> Dict[str, Any]:
+    def send_and_receive(self, command: Dict[str, Any], timeout: float = 10) -> Dict[str, Any]:
         """发送命令并接收响应
 
         Args:
             command: 命令字典
+            timeout: 超时时间（秒）
 
         Returns:
             响应字典
@@ -209,7 +283,17 @@ class SyncWebSocketServer:
             raise ConnectionError("服务端未启动")
 
         future = asyncio.run_coroutine_threadsafe(
-            self._server.send_command(command),
+            self._server.send_command(command, timeout),
             self._loop
         )
-        return future.result(timeout=15)
+        return future.result(timeout=timeout + 5)
+
+    def on_disconnect(self, callback: Callable):
+        """注册断开连接回调"""
+        if self._server:
+            self._server.on_disconnect(callback)
+
+    def on_reconnect(self, callback: Callable):
+        """注册重新连接回调"""
+        if self._server:
+            self._server.on_reconnect(callback)

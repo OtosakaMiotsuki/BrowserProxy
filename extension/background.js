@@ -1,12 +1,18 @@
 /**
  * BrowserProxy Chrome 扩展 - Service Worker
  * 连接到 Python 程序的 WebSocket 服务端
+ * 支持心跳和自动重连
  */
 
 // WebSocket 连接状态
 let ws = null;
 let connected = false;
 let currentPort = 8765;
+let heartbeatInterval = null;
+let reconnectTimeout = null;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+const RECONNECT_BASE_DELAY = 1000; // 1秒
 
 // 标签页信息缓存
 let tabsInfo = new Map();
@@ -15,19 +21,28 @@ let tabsInfo = new Map();
  * 连接到 WebSocket 服务端
  */
 function connectWebSocket(port = 8765) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    console.log('WebSocket 已连接');
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+    console.log('WebSocket 已连接或正在连接');
     return;
   }
 
   currentPort = port;
 
-  ws = new WebSocket(`ws://localhost:${port}`);
+  try {
+    ws = new WebSocket(`ws://localhost:${port}`);
+  } catch (e) {
+    console.error('创建 WebSocket 失败:', e);
+    scheduleReconnect();
+    return;
+  }
 
   ws.onopen = () => {
     console.log(`WebSocket 连接成功: ws://localhost:${port}`);
+    reconnectAttempts = 0;
     // 注册为扩展客户端
     ws.send(JSON.stringify({ type: 'register', client_type: 'extension' }));
+    // 启动心跳
+    startHeartbeat();
   };
 
   ws.onmessage = (event) => {
@@ -44,16 +59,27 @@ function connectWebSocket(port = 8765) {
         return;
       }
 
+      // 处理心跳响应
+      if (message.type === 'heartbeat_ack') {
+        return;
+      }
+
       handleMessage(message);
     } catch (e) {
       console.error('解析消息失败:', e);
     }
   };
 
-  ws.onclose = () => {
-    console.log('WebSocket 连接关闭');
+  ws.onclose = (event) => {
+    console.log(`WebSocket 连接关闭 (code: ${event.code})`);
     connected = false;
     updateBadge(false);
+    stopHeartbeat();
+
+    // 如果不是主动关闭，尝试重连
+    if (event.code !== 1000) {
+      scheduleReconnect();
+    }
   };
 
   ws.onerror = (error) => {
@@ -64,11 +90,64 @@ function connectWebSocket(port = 8765) {
 }
 
 /**
+ * 启动心跳
+ */
+function startHeartbeat() {
+  stopHeartbeat();
+  heartbeatInterval = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'heartbeat' }));
+    }
+  }, 5000); // 每5秒发送心跳
+}
+
+/**
+ * 停止心跳
+ */
+function stopHeartbeat() {
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+  }
+}
+
+/**
+ * 计划重连（指数退避）
+ */
+function scheduleReconnect() {
+  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    console.log('达到最大重连次数，停止重连');
+    return;
+  }
+
+  if (reconnectTimeout) {
+    clearTimeout(reconnectTimeout);
+  }
+
+  const delay = Math.min(RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttempts), 30000);
+  console.log(`将在 ${delay}ms 后重连 (第 ${reconnectAttempts + 1} 次)`);
+
+  reconnectTimeout = setTimeout(() => {
+    reconnectAttempts++;
+    connectWebSocket(currentPort);
+  }, delay);
+}
+
+/**
  * 断开 WebSocket 连接
  */
 function disconnectWebSocket() {
+  // 停止重连
+  if (reconnectTimeout) {
+    clearTimeout(reconnectTimeout);
+    reconnectTimeout = null;
+  }
+  reconnectAttempts = MAX_RECONNECT_ATTEMPTS; // 阻止自动重连
+
+  stopHeartbeat();
+
   if (ws) {
-    ws.close();
+    ws.close(1000); // 正常关闭
     ws = null;
   }
   connected = false;
@@ -202,6 +281,78 @@ async function handleMessage(message) {
 
       case 'clear':
         result = await executeOnTab(tab_id, 'clear', params);
+        break;
+
+      case 'wait_for_element_visible':
+        result = await executeOnTab(tab_id, 'waitForElementVisible', params);
+        break;
+
+      case 'wait_for_element_hidden':
+        result = await executeOnTab(tab_id, 'waitForElementHidden', params);
+        break;
+
+      case 'wait_for_text':
+        result = await executeOnTab(tab_id, 'waitForText', params);
+        break;
+
+      case 'find_by_text':
+        result = await executeOnTab(tab_id, 'findByText', params);
+        break;
+
+      case 'find_by_attr':
+        result = await executeOnTab(tab_id, 'findByAttr', params);
+        break;
+
+      case 'get_element_parent':
+        result = await executeOnTab(tab_id, 'getElementParent', params);
+        break;
+
+      case 'get_element_children':
+        result = await executeOnTab(tab_id, 'getElementChildren', params);
+        break;
+
+      case 'press_key':
+        result = await executeOnTab(tab_id, 'pressKey', params);
+        break;
+
+      case 'get_cookies':
+        result = await executeOnTab(tab_id, 'getCookies', params);
+        break;
+
+      case 'get_cookie':
+        result = await executeOnTab(tab_id, 'getCookie', params);
+        break;
+
+      case 'set_cookie':
+        result = await executeOnTab(tab_id, 'setCookie', params);
+        break;
+
+      case 'delete_cookie':
+        result = await executeOnTab(tab_id, 'deleteCookie', params);
+        break;
+
+      case 'get_local_storage':
+        result = await executeOnTab(tab_id, 'getLocalStorage', params);
+        break;
+
+      case 'set_local_storage':
+        result = await executeOnTab(tab_id, 'setLocalStorage', params);
+        break;
+
+      case 'delete_local_storage':
+        result = await executeOnTab(tab_id, 'deleteLocalStorage', params);
+        break;
+
+      case 'get_session_storage':
+        result = await executeOnTab(tab_id, 'getSessionStorage', params);
+        break;
+
+      case 'set_session_storage':
+        result = await executeOnTab(tab_id, 'setSessionStorage', params);
+        break;
+
+      case 'delete_session_storage':
+        result = await executeOnTab(tab_id, 'deleteSessionStorage', params);
         break;
 
       case 'wait_for_element':
@@ -729,6 +880,348 @@ function executeDOMAction(action, params) {
 
           checkElement();
         });
+
+      case 'waitForElementVisible':
+        // 等待元素可见
+        return new Promise((resolve) => {
+          const timeout = params.timeout || 10000;
+          const interval = params.interval || 100;
+          const startTime = Date.now();
+
+          const checkVisible = () => {
+            let el = null;
+            if (selector.startsWith('//') || selector.startsWith('(')) {
+              const result = document.evaluate(
+                selector, document, null,
+                XPathResult.FIRST_ORDERED_NODE_TYPE, null
+              );
+              el = result.singleNodeValue;
+            } else {
+              el = document.querySelector(selector);
+            }
+
+            if (el) {
+              const style = window.getComputedStyle(el);
+              const isVisible = style.display !== 'none' &&
+                               style.visibility !== 'hidden' &&
+                               style.opacity !== '0' &&
+                               el.offsetWidth > 0 &&
+                               el.offsetHeight > 0;
+
+              if (isVisible) {
+                resolve({ success: true, data: true });
+                return;
+              }
+            }
+
+            if (Date.now() - startTime > timeout) {
+              resolve({ success: false, error: '等待元素可见超时' });
+            } else {
+              setTimeout(checkVisible, interval);
+            }
+          };
+
+          checkVisible();
+        });
+
+      case 'waitForElementHidden':
+        // 等待元素消失
+        return new Promise((resolve) => {
+          const timeout = params.timeout || 10000;
+          const interval = params.interval || 100;
+          const startTime = Date.now();
+
+          const checkHidden = () => {
+            let el = null;
+            if (selector.startsWith('//') || selector.startsWith('(')) {
+              const result = document.evaluate(
+                selector, document, null,
+                XPathResult.FIRST_ORDERED_NODE_TYPE, null
+              );
+              el = result.singleNodeValue;
+            } else {
+              el = document.querySelector(selector);
+            }
+
+            if (!el) {
+              resolve({ success: true, data: true });
+              return;
+            }
+
+            const style = window.getComputedStyle(el);
+            const isHidden = style.display === 'none' ||
+                            style.visibility === 'hidden' ||
+                            style.opacity === '0' ||
+                            el.offsetWidth === 0 ||
+                            el.offsetHeight === 0;
+
+            if (isHidden) {
+              resolve({ success: true, data: true });
+            } else if (Date.now() - startTime > timeout) {
+              resolve({ success: false, error: '等待元素消失超时' });
+            } else {
+              setTimeout(checkHidden, interval);
+            }
+          };
+
+          checkHidden();
+        });
+
+      case 'waitForText':
+        // 等待页面包含指定文本
+        return new Promise((resolve) => {
+          const timeout = params.timeout || 10000;
+          const interval = params.interval || 100;
+          const startTime = Date.now();
+          const text = params.text;
+
+          const checkText = () => {
+            const bodyText = document.body.innerText || document.body.textContent || '';
+            if (bodyText.includes(text)) {
+              resolve({ success: true, data: true });
+            } else if (Date.now() - startTime > timeout) {
+              resolve({ success: false, error: `等待文本 "${text}" 超时` });
+            } else {
+              setTimeout(checkText, interval);
+            }
+          };
+
+          checkText();
+        });
+
+      // ========== 高级元素查找 ==========
+
+      case 'findByText':
+        // 按文本查找元素
+        {
+          const textToFind = params.text;
+          const exact = params.exact !== false;
+          const allElements = document.querySelectorAll('*');
+          const matches = [];
+
+          for (const el of allElements) {
+            const elText = el.textContent || '';
+            const match = exact ? elText.trim() === textToFind : elText.includes(textToFind);
+            if (match && el.children.length === 0) { // 叶子节点
+              matches.push({
+                tagName: el.tagName.toLowerCase(),
+                text: elText.trim(),
+                html: el.outerHTML
+              });
+            }
+          }
+
+          return { success: true, data: matches };
+        }
+
+      case 'findByAttr':
+        // 按属性查找元素
+        {
+          const attrName = params.attr;
+          const attrValue = params.value;
+          const selector = `[${attrName}="${attrValue}"]`;
+          const elements = document.querySelectorAll(selector);
+          const matches = [];
+
+          for (const el of elements) {
+            matches.push({
+              tagName: el.tagName.toLowerCase(),
+              text: el.textContent || '',
+              html: el.outerHTML
+            });
+          }
+
+          return { success: true, data: matches };
+        }
+
+      case 'getElementParent':
+        // 获取父元素
+        if (!element) return { success: false, error: `元素不存在: ${selector}` };
+        {
+          const parent = element.parentElement;
+          if (parent) {
+            return {
+              success: true,
+              data: {
+                tagName: parent.tagName.toLowerCase(),
+                text: parent.textContent || '',
+                html: parent.outerHTML
+              }
+            };
+          }
+          return { success: true, data: null };
+        }
+
+      case 'getElementChildren':
+        // 获取子元素
+        if (!element) return { success: false, error: `元素不存在: ${selector}` };
+        {
+          const children = Array.from(element.children);
+          return {
+            success: true,
+            data: children.map(child => ({
+              tagName: child.tagName.toLowerCase(),
+              text: child.textContent || '',
+              html: child.outerHTML
+            }))
+          };
+        }
+
+      // ========== 键盘操作 ==========
+
+      case 'pressKey':
+        // 按下按键
+        if (!element) return { success: false, error: `元素不存在: ${selector}` };
+        element.focus();
+        {
+          const key = params.key;
+          const modifiers = params.modifiers || [];
+
+          // 创建键盘事件
+          const keyDownEvent = new KeyboardEvent('keydown', {
+            key: key,
+            code: params.code || key,
+            bubbles: true,
+            ctrlKey: modifiers.includes('ctrl'),
+            shiftKey: modifiers.includes('shift'),
+            altKey: modifiers.includes('alt'),
+            metaKey: modifiers.includes('meta')
+          });
+
+          const keyUpEvent = new KeyboardEvent('keyup', {
+            key: key,
+            code: params.code || key,
+            bubbles: true,
+            ctrlKey: modifiers.includes('ctrl'),
+            shiftKey: modifiers.includes('shift'),
+            altKey: modifiers.includes('alt'),
+            metaKey: modifiers.includes('meta')
+          });
+
+          element.dispatchEvent(keyDownEvent);
+          element.dispatchEvent(keyUpEvent);
+          return { success: true };
+        }
+
+      // ========== Cookie / Storage 操作 ==========
+
+      case 'getCookies':
+        // 获取所有 Cookie
+        return { success: true, data: document.cookie };
+
+      case 'getCookie':
+        // 获取指定 Cookie
+        {
+          const cookieName = params.name;
+          const cookies = document.cookie.split(';');
+          for (const cookie of cookies) {
+            const [name, value] = cookie.trim().split('=');
+            if (name === cookieName) {
+              return { success: true, data: decodeURIComponent(value || '') };
+            }
+          }
+          return { success: true, data: null };
+        }
+
+      case 'setCookie':
+        // 设置 Cookie
+        {
+          const { name, value, days, path, domain } = params;
+          let cookieStr = `${encodeURIComponent(name)}=${encodeURIComponent(value)}`;
+          if (days) {
+            const expires = new Date(Date.now() + days * 864e5).toUTCString();
+            cookieStr += `; expires=${expires}`;
+          }
+          if (path) cookieStr += `; path=${path}`;
+          if (domain) cookieStr += `; domain=${domain}`;
+          document.cookie = cookieStr;
+          return { success: true };
+        }
+
+      case 'deleteCookie':
+        // 删除 Cookie
+        {
+          const cookieName = params.name;
+          document.cookie = `${encodeURIComponent(cookieName)}=; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+          return { success: true };
+        }
+
+      case 'getLocalStorage':
+        // 获取 localStorage
+        {
+          const key = params.key;
+          if (key) {
+            const value = localStorage.getItem(key);
+            return { success: true, data: value };
+          }
+          // 获取所有
+          const all = {};
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            all[k] = localStorage.getItem(k);
+          }
+          return { success: true, data: all };
+        }
+
+      case 'setLocalStorage':
+        // 设置 localStorage
+        {
+          localStorage.setItem(params.key, params.value);
+          return { success: true };
+        }
+
+      case 'deleteLocalStorage':
+        // 删除 localStorage
+        {
+          localStorage.removeItem(params.key);
+          return { success: true };
+        }
+
+      case 'getSessionStorage':
+        // 获取 sessionStorage
+        {
+          const key = params.key;
+          if (key) {
+            const value = sessionStorage.getItem(key);
+            return { success: true, data: value };
+          }
+          const all = {};
+          for (let i = 0; i < sessionStorage.length; i++) {
+            const k = sessionStorage.key(i);
+            all[k] = sessionStorage.getItem(k);
+          }
+          return { success: true, data: all };
+        }
+
+      case 'setSessionStorage':
+        // 设置 sessionStorage
+        {
+          sessionStorage.setItem(params.key, params.value);
+          return { success: true };
+        }
+
+      case 'deleteSessionStorage':
+        // 删除 sessionStorage
+        {
+          sessionStorage.removeItem(params.key);
+          return { success: true };
+        }
+
+      // ========== 截图 ==========
+
+      case 'screenshot':
+        // 截图（通过 html2canvas 或手动实现）
+        // 注意：这个需要注入 html2canvas 库，或者使用 canvas API
+        // 简单实现：返回页面的基本信息
+        return {
+          success: true,
+          data: {
+            url: window.location.href,
+            title: document.title,
+            width: document.documentElement.scrollWidth,
+            height: document.documentElement.scrollHeight
+          }
+        };
 
       // ========== 页面操作 ==========
 

@@ -196,6 +196,209 @@ class Tab:
             return Element(self, selector)
         raise Exception(f"等待元素超时: {selector}")
 
+    def wait_for_element_visible(self, selector: str, timeout: float = 10) -> "Element":
+        """等待元素可见
+
+        Args:
+            selector: CSS 或 XPath 选择器
+            timeout: 超时时间（秒）
+
+        Returns:
+            Element 对象
+        """
+        logger.debug(f"等待元素可见: {selector} (超时: {timeout}s)")
+        response = self._send_command("wait_for_element_visible", {
+            "selector": selector,
+            "timeout": int(timeout * 1000)
+        })
+        if response.get("success"):
+            return Element(self, selector)
+        raise Exception(f"等待元素可见超时: {selector}")
+
+    def wait_for_element_hidden(self, selector: str, timeout: float = 10) -> None:
+        """等待元素消失
+
+        Args:
+            selector: CSS 或 XPath 选择器
+            timeout: 超时时间（秒）
+        """
+        logger.debug(f"等待元素消失: {selector} (超时: {timeout}s)")
+        response = self._send_command("wait_for_element_hidden", {
+            "selector": selector,
+            "timeout": int(timeout * 1000)
+        })
+        if not response.get("success"):
+            raise Exception(f"等待元素消失超时: {selector}")
+
+    def wait_for_text(self, text: str, timeout: float = 10) -> None:
+        """等待页面包含指定文本
+
+        Args:
+            text: 要等待的文本
+            timeout: 超时时间（秒）
+        """
+        logger.debug(f"等待文本: '{text}' (超时: {timeout}s)")
+        response = self._send_command("wait_for_text", {
+            "text": text,
+            "timeout": int(timeout * 1000)
+        })
+        if not response.get("success"):
+            raise Exception(f"等待文本超时: {text}")
+
+    # ========== 高级元素查找 ==========
+
+    def find_by_text(self, text: str, exact: bool = True) -> List[Dict[str, str]]:
+        """按文本查找元素
+
+        Args:
+            text: 要查找的文本
+            exact: 是否精确匹配
+
+        Returns:
+            匹配的元素列表
+        """
+        logger.debug(f"按文本查找: '{text}' (精确: {exact})")
+        response = self._send_command("find_by_text", {"text": text, "exact": exact})
+        if response.get("success"):
+            return response.get("data", [])
+        raise Exception(f"查找失败: {response.get('error')}")
+
+    def find_by_attr(self, attr: str, value: str) -> List[Dict[str, str]]:
+        """按属性查找元素
+
+        Args:
+            attr: 属性名
+            value: 属性值
+
+        Returns:
+            匹配的元素列表
+        """
+        logger.debug(f"按属性查找: [{attr}={value}]")
+        response = self._send_command("find_by_attr", {"attr": attr, "value": value})
+        if response.get("success"):
+            return response.get("data", [])
+        raise Exception(f"查找失败: {response.get('error')}")
+
+    # ========== Cookie / Storage ==========
+
+    def get_cookies(self) -> str:
+        """获取所有 Cookie
+
+        Returns:
+            Cookie 字符串
+        """
+        logger.debug("获取所有 Cookie")
+        response = self._send_command("get_cookies")
+        if response.get("success"):
+            return response.get("data", "")
+        raise Exception(f"获取 Cookie 失败: {response.get('error')}")
+
+    def get_cookie(self, name: str) -> Optional[str]:
+        """获取指定 Cookie
+
+        Args:
+            name: Cookie 名称
+
+        Returns:
+            Cookie 值
+        """
+        logger.debug(f"获取 Cookie: {name}")
+        response = self._send_command("get_cookie", {"name": name})
+        if response.get("success"):
+            return response.get("data")
+        raise Exception(f"获取 Cookie 失败: {response.get('error')}")
+
+    def set_cookie(self, name: str, value: str, days: int = 30, path: str = "/") -> None:
+        """设置 Cookie
+
+        Args:
+            name: Cookie 名称
+            value: Cookie 值
+            days: 过期天数
+            path: 路径
+        """
+        logger.debug(f"设置 Cookie: {name}={value}")
+        self._send_command("set_cookie", {
+            "name": name, "value": value, "days": days, "path": path
+        })
+
+    def delete_cookie(self, name: str) -> None:
+        """删除 Cookie
+
+        Args:
+            name: Cookie 名称
+        """
+        logger.debug(f"删除 Cookie: {name}")
+        self._send_command("delete_cookie", {"name": name})
+
+    def get_local_storage(self, key: str = None) -> Any:
+        """获取 localStorage
+
+        Args:
+            key: 键名，为 None 时获取所有
+
+        Returns:
+            值或字典
+        """
+        logger.debug(f"获取 localStorage: {key or 'all'}")
+        response = self._send_command("get_local_storage", {"key": key})
+        if response.get("success"):
+            return response.get("data")
+        raise Exception(f"获取 localStorage 失败: {response.get('error')}")
+
+    def set_local_storage(self, key: str, value: str) -> None:
+        """设置 localStorage
+
+        Args:
+            key: 键名
+            value: 值
+        """
+        logger.debug(f"设置 localStorage: {key}={value}")
+        self._send_command("set_local_storage", {"key": key, "value": value})
+
+    def delete_local_storage(self, key: str) -> None:
+        """删除 localStorage
+
+        Args:
+            key: 键名
+        """
+        logger.debug(f"删除 localStorage: {key}")
+        self._send_command("delete_local_storage", {"key": key})
+
+    def get_session_storage(self, key: str = None) -> Any:
+        """获取 sessionStorage
+
+        Args:
+            key: 键名，为 None 时获取所有
+
+        Returns:
+            值或字典
+        """
+        logger.debug(f"获取 sessionStorage: {key or 'all'}")
+        response = self._send_command("get_session_storage", {"key": key})
+        if response.get("success"):
+            return response.get("data")
+        raise Exception(f"获取 sessionStorage 失败: {response.get('error')}")
+
+    def set_session_storage(self, key: str, value: str) -> None:
+        """设置 sessionStorage
+
+        Args:
+            key: 键名
+            value: 值
+        """
+        logger.debug(f"设置 sessionStorage: {key}={value}")
+        self._send_command("set_session_storage", {"key": key, "value": value})
+
+    def delete_session_storage(self, key: str) -> None:
+        """删除 sessionStorage
+
+        Args:
+            key: 键名
+        """
+        logger.debug(f"删除 sessionStorage: {key}")
+        self._send_command("delete_session_storage", {"key": key})
+
     # ========== JavaScript ==========
 
     def run_js(self, script: str) -> Any:
@@ -381,6 +584,119 @@ class Element:
         logger.debug(f"取消勾选: {self._selector}")
         self._send_command("uncheck")
 
+    # ========== 键盘操作 ==========
+
+    def press_key(self, key: str, modifiers: List[str] = None) -> None:
+        """按下按键
+
+        Args:
+            key: 按键名称（如 "Enter", "Tab", "Escape"）
+            modifiers: 修饰键列表（如 ["ctrl", "shift"]）
+        """
+        logger.debug(f"按键: {key} (修饰键: {modifiers or []})")
+        self._send_command("press_key", {"key": key, "modifiers": modifiers or []})
+
+    def press_enter(self) -> None:
+        """按下回车键"""
+        self.press_key("Enter")
+
+    def press_tab(self) -> None:
+        """按下 Tab 键"""
+        self.press_key("Tab")
+
+    def press_escape(self) -> None:
+        """按下 Escape 键"""
+        self.press_key("Escape")
+
+    def press_backspace(self) -> None:
+        """按下 Backspace 键"""
+        self.press_key("Backspace")
+
+    def press_delete(self) -> None:
+        """按下 Delete 键"""
+        self.press_key("Delete")
+
+    def press_home(self) -> None:
+        """按下 Home 键"""
+        self.press_key("Home")
+
+    def press_end(self) -> None:
+        """按下 End 键"""
+        self.press_key("End")
+
+    def press_page_up(self) -> None:
+        """按下 Page Up 键"""
+        self.press_key("PageUp")
+
+    def press_page_down(self) -> None:
+        """按下 Page Down 键"""
+        self.press_key("PageDown")
+
+    def press_arrow_up(self) -> None:
+        """按下上箭头"""
+        self.press_key("ArrowUp")
+
+    def press_arrow_down(self) -> None:
+        """按下下箭头"""
+        self.press_key("ArrowDown")
+
+    def press_arrow_left(self) -> None:
+        """按下左箭头"""
+        self.press_key("ArrowLeft")
+
+    def press_arrow_right(self) -> None:
+        """按下右箭头"""
+        self.press_key("ArrowRight")
+
+    def press_ctrl_a(self) -> None:
+        """全选 (Ctrl+A)"""
+        self.press_key("a", ["ctrl"])
+
+    def press_ctrl_c(self) -> None:
+        """复制 (Ctrl+C)"""
+        self.press_key("c", ["ctrl"])
+
+    def press_ctrl_v(self) -> None:
+        """粘贴 (Ctrl+V)"""
+        self.press_key("v", ["ctrl"])
+
+    def press_ctrl_x(self) -> None:
+        """剪切 (Ctrl+X)"""
+        self.press_key("x", ["ctrl"])
+
+    def press_ctrl_z(self) -> None:
+        """撤销 (Ctrl+Z)"""
+        self.press_key("z", ["ctrl"])
+
+    def press_ctrl_s(self) -> None:
+        """保存 (Ctrl+S)"""
+        self.press_key("s", ["ctrl"])
+
+    # ========== DOM 遍历 ==========
+
+    @property
+    def parent(self) -> Optional["Element"]:
+        """获取父元素（返回新 Element 需要知道选择器）"""
+        logger.debug(f"获取父元素: {self._selector}")
+        response = self._send_command("get_element_parent")
+        if response.get("success"):
+            data = response.get("data")
+            if data:
+                # 创建一个虚拟元素
+                return VirtualElement(self._tab, data)
+            return None
+        raise Exception(f"获取父元素失败: {response.get('error')}")
+
+    @property
+    def children(self) -> List["VirtualElement"]:
+        """获取子元素列表"""
+        logger.debug(f"获取子元素: {self._selector}")
+        response = self._send_command("get_element_children")
+        if response.get("success"):
+            data = response.get("data", [])
+            return [VirtualElement(self._tab, item) for item in data]
+        raise Exception(f"获取子元素失败: {response.get('error')}")
+
 
 class Elements:
     """多个元素类"""
@@ -439,3 +755,35 @@ class Elements:
         if self._elements:
             return self._elements[-1]
         raise Exception(f"没有找到元素: {self._selector}")
+
+
+class VirtualElement:
+    """虚拟元素类（用于 DOM 遍历返回的结果）"""
+
+    def __init__(self, tab: Tab, data: Dict[str, Any]):
+        """初始化
+
+        Args:
+            tab: 所属标签页
+            data: 元素数据
+        """
+        self._tab = tab
+        self._data = data
+
+    @property
+    def tag_name(self) -> str:
+        """获取标签名"""
+        return self._data.get("tagName", "")
+
+    @property
+    def text(self) -> str:
+        """获取文本内容"""
+        return self._data.get("text", "")
+
+    @property
+    def html(self) -> str:
+        """获取 HTML"""
+        return self._data.get("html", "")
+
+    def __repr__(self) -> str:
+        return f"<VirtualElement tag={self.tag_name} text={self.text[:30]}>"

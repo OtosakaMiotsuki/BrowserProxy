@@ -1,20 +1,44 @@
 [project]
 name = "browserproxy"
-version = "0.1.0"
-description = "通过 Chrome 扩展 + WebSocket 实现对已打开浏览器的操控"
+version = "0.2.0"
+description = "通过 Chrome 扩展 + Python 实现对已打开浏览器的自动化操控"
 readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.10"
+authors = [
+    {name = "Miotsuki", email = "yuhao_engineer@163.com"}
+]
+keywords = ["browser", "automation", "chrome", "extension", "websocket"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
     "websocket-client>=1.6.0",
+    "websockets>=12.0",
     "loguru>=0.7.0",
-    "websockets>=16.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
+    "DrissionPage>=4.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/OtosakaMiotsuki/BrowserProxy"
+Repository = "https://github.com/OtosakaMiotsuki/BrowserProxy"
+Issues = "https://github.com/OtosakaMiotsuki/BrowserProxy/issues"
 
 [build-system]
 requires = ["hatchling"]
@@ -23,11 +47,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/browserproxy"]
 
+[tool.hatch.build.targets.wheel.shared-data]
+"extension" = "browserproxy/extension"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-
-[dependency-groups]
-dev = [
-    "drissionpage>=4.1.1.4",
-    "pillow>=12.2.0",
-]
