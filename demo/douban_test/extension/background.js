@@ -673,14 +673,11 @@ async function waitForLoad(tabId, timeout = 10000) {
  */
 async function executeScript(tabId, script) {
   try {
-    // 使用 Function 构造器代替 eval，避免 CSP 限制
     const results = await chrome.scripting.executeScript({
       target: { tabId },
       func: (code) => {
         try {
-          // 将用户代码包装在函数中执行
-          const fn = new Function('return ' + code);
-          return { success: true, data: fn() };
+          return { success: true, data: eval(code) };
         } catch (e) {
           return { success: false, error: e.message };
         }

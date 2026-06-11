@@ -482,23 +482,6 @@ class Tab:
             return response.get("data", {})
         raise Exception(f"获取元素位置失败: {response.get('error')}")
 
-    # ========== JavaScript ==========
-
-    def run_js(self, script: str) -> Any:
-        """执行 JavaScript 代码
-
-        Args:
-            script: JS 代码
-
-        Returns:
-            执行结果
-        """
-        logger.debug(f"执行 JS: {script[:50]}...")
-        response = self._send_command("execute_script", {"script": script})
-        if response.get("success"):
-            return response.get("data")
-        raise Exception(f"JS 执行失败: {response.get('error')}")
-
 
 class Element:
     """单个元素类"""
