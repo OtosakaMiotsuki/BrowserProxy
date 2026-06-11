@@ -1,11 +1,12 @@
 """Tab 类模块"""
 
-from typing import Any, Dict, Optional
+import time
+from typing import Any, Dict, List, Optional
 from loguru import logger
 
 
 class Tab:
-    """标签页类，执行 DOM 操作"""
+    """标签页类，执行 DOM 操作和页面操作"""
 
     def __init__(self, tab_id: int, ws_server: Any, url: str = "", title: str = ""):
         """初始化标签页
@@ -38,8 +39,10 @@ class Tab:
         }
         return self._ws_server.send_and_receive(command)
 
+    # ========== 元素选择 ==========
+
     def ele(self, selector: str) -> "Element":
-        """获取元素
+        """获取单个元素
 
         Args:
             selector: CSS 或 XPath 选择器
@@ -48,6 +51,19 @@ class Tab:
             Element 对象
         """
         return Element(self, selector)
+
+    def eles(self, selector: str) -> List["Element"]:
+        """获取所有匹配的元素
+
+        Args:
+            selector: CSS 或 XPath 选择器
+
+        Returns:
+            Element 列表
+        """
+        return Elements(self, selector)
+
+    # ========== 页面导航 ==========
 
     def get(self, url: str) -> None:
         """跳转到指定 URL
@@ -73,6 +89,115 @@ class Tab:
         logger.debug("刷新页面")
         self._send_command("refresh")
 
+    # ========== 页面内容 ==========
+
+    @property
+    def html(self) -> str:
+        """获取页面 HTML"""
+        logger.debug("获取页面 HTML")
+        response = self._send_command("get_page_html")
+        if response.get("success"):
+            return response.get("data", "")
+        raise Exception(f"获取页面 HTML 失败: {response.get('error')}")
+
+    @property
+    def text(self) -> str:
+        """获取页面文本"""
+        logger.debug("获取页面文本")
+        response = self._send_command("get_page_text")
+        if response.get("success"):
+            return response.get("data", "")
+        raise Exception(f"获取页面文本失败: {response.get('error')}")
+
+    @property
+    def current_url(self) -> str:
+        """获取当前 URL"""
+        logger.debug("获取当前 URL")
+        response = self._send_command("get_page_url")
+        if response.get("success"):
+            return response.get("data", "")
+        raise Exception(f"获取 URL 失败: {response.get('error')}")
+
+    @property
+    def current_title(self) -> str:
+        """获取当前标题"""
+        logger.debug("获取当前标题")
+        response = self._send_command("get_page_title")
+        if response.get("success"):
+            return response.get("data", "")
+        raise Exception(f"获取标题失败: {response.get('error')}")
+
+    # ========== 页面滚动 ==========
+
+    def scroll_to(self, x: int = 0, y: int = 0) -> None:
+        """滚动到指定位置
+
+        Args:
+            x: X 坐标
+            y: Y 坐标
+        """
+        logger.debug(f"滚动到 ({x}, {y})")
+        self._send_command("scroll_to", {"x": x, "y": y})
+
+    def scroll_by(self, x: int = 0, y: int = 0) -> None:
+        """滚动指定距离
+
+        Args:
+            x: X 轴滚动距离
+            y: Y 轴滚动距离
+        """
+        logger.debug(f"滚动 ({x}, {y})")
+        self._send_command("scroll_by", {"x": x, "y": y})
+
+    def scroll_to_top(self) -> None:
+        """滚动到顶部"""
+        self.scroll_to(y=0)
+
+    def scroll_to_bottom(self) -> None:
+        """滚动到底部"""
+        self.scroll_by(y=999999)
+
+    # ========== 等待 ==========
+
+    def wait(self, seconds: float) -> None:
+        """等待指定时间
+
+        Args:
+            seconds: 等待秒数
+        """
+        logger.debug(f"等待 {seconds} 秒")
+        time.sleep(seconds)
+
+    def wait_for_load(self, timeout: float = 10) -> None:
+        """等待页面加载完成
+
+        Args:
+            timeout: 超时时间（秒）
+        """
+        logger.debug(f"等待页面加载 (超时: {timeout}s)")
+        self._send_command("wait_for_load", {"timeout": int(timeout * 1000)})
+
+    def wait_for_element(self, selector: str, timeout: float = 10) -> "Element":
+        """等待元素出现
+
+        Args:
+            selector: CSS 或 XPath 选择器
+            timeout: 超时时间（秒）
+
+        Returns:
+            Element 对象
+        """
+        logger.debug(f"等待元素出现: {selector} (超时: {timeout}s)")
+        response = self._send_command("wait_for_element", {
+            "selector": selector,
+            "timeout": int(timeout * 1000)
+        })
+        if response.get("success"):
+            return Element(self, selector)
+        raise Exception(f"等待元素超时: {selector}")
+
+    # ========== JavaScript ==========
+
     def run_js(self, script: str) -> Any:
         """执行 JavaScript 代码
 
@@ -90,7 +215,7 @@ class Tab:
 
 
 class Element:
-    """元素类"""
+    """单个元素类"""
 
     def __init__(self, tab: Tab, selector: str):
         """初始化元素
@@ -102,10 +227,19 @@ class Element:
         self._tab = tab
         self._selector = selector
 
+    def _send_command(self, action: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """发送命令"""
+        cmd_params = {"selector": self._selector}
+        if params:
+            cmd_params.update(params)
+        return self._tab._send_command(action, cmd_params)
+
+    # ========== 基本操作 ==========
+
     def click(self) -> None:
         """点击元素"""
         logger.debug(f"点击元素: {self._selector}")
-        self._tab._send_command("click", {"selector": self._selector})
+        self._send_command("click")
 
     def input(self, text: str) -> None:
         """输入文本
@@ -114,16 +248,56 @@ class Element:
             text: 要输入的文本
         """
         logger.debug(f"输入文本到 {self._selector}: {text}")
-        self._tab._send_command("input", {"selector": self._selector, "text": text})
+        self._send_command("input", {"text": text})
+
+    def clear(self) -> None:
+        """清空输入框"""
+        logger.debug(f"清空: {self._selector}")
+        self._send_command("clear")
+
+    def focus(self) -> None:
+        """聚焦元素"""
+        logger.debug(f"聚焦: {self._selector}")
+        self._send_command("focus")
+
+    def blur(self) -> None:
+        """失去焦点"""
+        logger.debug(f"失去焦点: {self._selector}")
+        self._send_command("blur")
+
+    def hover(self) -> None:
+        """悬停元素"""
+        logger.debug(f"悬停: {self._selector}")
+        self._send_command("hover")
+
+    # ========== 内容获取 ==========
 
     @property
     def text(self) -> str:
         """获取元素文本"""
         logger.debug(f"获取元素文本: {self._selector}")
-        response = self._tab._send_command("get_text", {"selector": self._selector})
+        response = self._send_command("get_text")
         if response.get("success"):
             return response.get("data", "")
         raise Exception(f"获取文本失败: {response.get('error')}")
+
+    @property
+    def html(self) -> str:
+        """获取元素 HTML"""
+        logger.debug(f"获取元素 HTML: {self._selector}")
+        response = self._send_command("get_html")
+        if response.get("success"):
+            return response.get("data", "")
+        raise Exception(f"获取 HTML 失败: {response.get('error')}")
+
+    @property
+    def outer_html(self) -> str:
+        """获取元素外部 HTML"""
+        logger.debug(f"获取元素外部 HTML: {self._selector}")
+        response = self._send_command("get_outer_html")
+        if response.get("success"):
+            return response.get("data", "")
+        raise Exception(f"获取外部 HTML 失败: {response.get('error')}")
 
     def attr(self, name: str) -> Optional[str]:
         """获取元素属性
@@ -135,13 +309,12 @@ class Element:
             属性值
         """
         logger.debug(f"获取元素属性: {self._selector}.{name}")
-        response = self._tab._send_command("get_attr", {
-            "selector": self._selector,
-            "attr": name
-        })
+        response = self._send_command("get_attr", {"attr": name})
         if response.get("success"):
             return response.get("data")
         raise Exception(f"获取属性失败: {response.get('error')}")
+
+    # ========== 状态检查 ==========
 
     def exists(self) -> bool:
         """检查元素是否存在
@@ -150,7 +323,119 @@ class Element:
             元素是否存在
         """
         logger.debug(f"检查元素是否存在: {self._selector}")
-        response = self._tab._send_command("exists", {"selector": self._selector})
+        response = self._send_command("exists")
         if response.get("success"):
             return response.get("data", False)
         raise Exception(f"检查元素失败: {response.get('error')}")
+
+    def is_visible(self) -> bool:
+        """检查元素是否可见
+
+        Returns:
+            元素是否可见
+        """
+        logger.debug(f"检查元素是否可见: {self._selector}")
+        response = self._send_command("is_visible")
+        if response.get("success"):
+            return response.get("data", False)
+        raise Exception(f"检查可见性失败: {response.get('error')}")
+
+    # ========== 位置和滚动 ==========
+
+    @property
+    def rect(self) -> Dict[str, float]:
+        """获取元素位置和大小
+
+        Returns:
+            包含 x, y, width, height, top, left, bottom, right 的字典
+        """
+        logger.debug(f"获取元素位置: {self._selector}")
+        response = self._send_command("get_element_rect")
+        if response.get("success"):
+            return response.get("data", {})
+        raise Exception(f"获取位置失败: {response.get('error')}")
+
+    def scroll_to(self) -> None:
+        """滚动到元素位置"""
+        logger.debug(f"滚动到元素: {self._selector}")
+        self._send_command("scroll_to_element")
+
+    # ========== 表单操作 ==========
+
+    def select(self, value: str) -> None:
+        """选择下拉框选项
+
+        Args:
+            value: 选项值
+        """
+        logger.debug(f"选择选项: {self._selector} = {value}")
+        self._send_command("select_option", {"value": value})
+
+    def check(self) -> None:
+        """勾选复选框"""
+        logger.debug(f"勾选: {self._selector}")
+        self._send_command("check")
+
+    def uncheck(self) -> None:
+        """取消勾选复选框"""
+        logger.debug(f"取消勾选: {self._selector}")
+        self._send_command("uncheck")
+
+
+class Elements:
+    """多个元素类"""
+
+    def __init__(self, tab: Tab, selector: str):
+        """初始化
+
+        Args:
+            tab: 所属标签页
+            selector: 选择器
+        """
+        self._tab = tab
+        self._selector = selector
+        self._elements: List[Element] = []
+
+    def _load_elements(self) -> None:
+        """加载元素列表"""
+        if not self._elements:
+            response = self._tab._send_command("get_elements", {"selector": self._selector})
+            if response.get("success"):
+                count = response.get("data", [])
+                # 创建多个 Element 对象
+                self._elements = [Element(self._tab, self._selector) for _ in range(len(count))]
+
+    def __len__(self) -> int:
+        """获取元素数量"""
+        self._load_elements()
+        return len(self._elements)
+
+    def __getitem__(self, index: int) -> Element:
+        """获取指定索引的元素"""
+        self._load_elements()
+        return self._elements[index]
+
+    def __iter__(self):
+        """迭代元素"""
+        self._load_elements()
+        return iter(self._elements)
+
+    @property
+    def count(self) -> int:
+        """获取元素数量"""
+        self._load_elements()
+        return len(self._elements)
+
+    def first(self) -> Element:
+        """获取第一个元素"""
+        self._load_elements()
+        if self._elements:
+            return self._elements[0]
+        raise Exception(f"没有找到元素: {self._selector}")
+
+    def last(self) -> Element:
+        """获取最后一个元素"""
+        self._load_elements()
+        if self._elements:
+            return self._elements[-1]
+        raise Exception(f"没有找到元素: {self._selector}")

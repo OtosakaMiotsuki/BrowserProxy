@@ -54,6 +54,8 @@ class Browser:
         self._tabs = []
         logger.info("已断开连接")
 
+    # ========== 标签页管理 ==========
+
     def get_tabs(self) -> List[Tab]:
         """获取所有标签页
 
@@ -82,6 +84,131 @@ class Browser:
 
         logger.info(f"获取到 {len(self._tabs)} 个标签页")
         return self._tabs
+
+    def get_active_tab(self) -> Tab:
+        """获取当前活动标签页
+
+        Returns:
+            当前活动的 Tab 对象
+        """
+        if not self.connected:
+            raise ConnectionError("未连接到浏览器扩展")
+
+        response = self._ws_server.send_and_receive({
+            "action": "get_active_tab"
+        })
+
+        if not response.get("success"):
+            raise Exception(f"获取活动标签页失败: {response.get('error')}")
+
+        tab_data = response.get("data", {})
+        return Tab(
+            tab_id=tab_data["id"],
+            ws_server=self._ws_server,
+            url=tab_data.get("url", ""),
+            title=tab_data.get("title", "")
+        )
+
+    def new_tab(self, url: str = "chrome://newtab/", activate: bool = True) -> Tab:
+        """创建新标签页
+
+        Args:
+            url: 新标签页的 URL
+            activate: 是否激活新标签页
+
+        Returns:
+            新创建的 Tab 对象
+        """
+        if not self.connected:
+            raise ConnectionError("未连接到浏览器扩展")
+
+        response = self._ws_server.send_and_receive({
+            "action": "create_tab",
+            "params": {"url": url, "active": activate}
+        })
+
+        if not response.get("success"):
+            raise Exception(f"创建标签页失败: {response.get('error')}")
+
+        tab_data = response.get("data", {})
+        tab = Tab(
+            tab_id=tab_data["id"],
+            ws_server=self._ws_server,
+            url=tab_data.get("url", ""),
+            title=tab_data.get("title", "")
+        )
+
+        # 添加到标签页列表
+        self._tabs.append(tab)
+
+        logger.info(f"创建新标签页: {tab.tab_id}")
+        return tab
+
+    def close_tab(self, tab_id: int) -> None:
+        """关闭标签页
+
+        Args:
+            tab_id: 标签页 ID
+        """
+        if not self.connected:
+            raise ConnectionError("未连接到浏览器扩展")
+
+        response = self._ws_server.send_and_receive({
+            "action": "close_tab",
+            "tab_id": tab_id
+        })
+
+        if not response.get("success"):
+            raise Exception(f"关闭标签页失败: {response.get('error')}")
+
+        # 从列表中移除
+        self._tabs = [t for t in self._tabs if t.tab_id != tab_id]
+
+        logger.info(f"关闭标签页: {tab_id}")
+
+    def switch_tab(self, tab_id: int) -> Tab:
+        """切换到指定标签页
+
+        Args:
+            tab_id: 标签页 ID
+
+        Returns:
+            切换后的 Tab 对象
+        """
+        if not self.connected:
+            raise ConnectionError("未连接到浏览器扩展")
+
+        response = self._ws_server.send_and_receive({
+            "action": "switch_tab",
+            "tab_id": tab_id
+        })
+
+        if not response.get("success"):
+            raise Exception(f"切换标签页失败: {response.get('error')}")
+
+        tab_data = response.get("data", {})
+        return Tab(
+            tab_id=tab_data["id"],
+            ws_server=self._ws_server,
+            url=tab_data.get("url", ""),
+            title=tab_data.get("title", "")
+        )
+
+    @property
+    def tab_count(self) -> int:
+        """获取标签页数量"""
+        if not self.connected:
+            raise ConnectionError("未连接到浏览器扩展")
+
+        response = self._ws_server.send_and_receive({
+            "action": "get_tab_count"
+        })
+
+        if response.get("success"):
+            return response.get("data", 0)
+        return 0
+
+    # ========== 标签页匹配 ==========
 
     def match(
         self,
@@ -122,7 +249,7 @@ class Browser:
         return TabMatcher.find_all(self._tabs, url_contains, title_contains)
 
     def select_tab(self, tab_id: int) -> Optional[Tab]:
-        """选择标签页
+        """选择标签页（从已获取的列表中）
 
         Args:
             tab_id: 标签页 ID
