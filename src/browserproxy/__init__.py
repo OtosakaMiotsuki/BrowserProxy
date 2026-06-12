@@ -5,6 +5,7 @@ BrowserProxy - 浏览器自动化工具
 
 import shutil
 from pathlib import Path
+from loguru import logger
 from .browser import Browser
 from .tab import Tab, Element, Elements, VirtualElement
 from .match import TabMatcher
@@ -38,7 +39,7 @@ __author__ = "Miotsuki"
 __email__ = "yuhao_engineer@163.com"
 __all__ = [
     "Browser", "Tab", "Element", "Elements", "TabMatcher",
-    "install_extension", "get_extension_path",
+    "install_extension", "get_extension_path", "enable_logging",
     "BrowserProxyError",
     "BpConnectionError", "ConnectionTimeoutError", "NotConnectedError",
     "ExtensionError", "ExtensionNotConnectedError",
@@ -50,6 +51,9 @@ __all__ = [
     "IframeError", "IframeNotFoundError",
     "CookieError", "DownloadError", "ScreenshotError",
 ]
+
+# 默认静默：移除 loguru 的 stderr handler，框架不主动输出日志
+logger.remove()
 
 
 def install_extension(target_dir: str = None) -> str:
@@ -100,3 +104,15 @@ def get_extension_path() -> Path:
         扩展目录路径
     """
     return Path(__file__).parent / "extension"
+
+
+def enable_logging(level: str = "INFO", fmt: str = None) -> None:
+    """启用框架日志输出（默认静默）
+
+    Args:
+        level: 日志级别，DEBUG / INFO / WARNING / ERROR
+        fmt: 自定义格式，默认: {time:HH:mm:ss} | {level} | {message}
+    """
+    if fmt is None:
+        fmt = "{time:HH:mm:ss} | {level} | {message}"
+    logger.add(lambda m: print(m, end=""), level=level, format=fmt)

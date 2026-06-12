@@ -6,11 +6,10 @@ BrowserProxy 测试程序
 import sys
 import time
 from loguru import logger
-from browserproxy import Browser
+from browserproxy import Browser, enable_logging
 
-# 配置日志
-logger.remove()
-logger.add(sys.stderr, level="INFO", format="{time:HH:mm:ss} | {level} | {message}")
+# 启用框架日志
+enable_logging(level="INFO")
 
 
 def main():
