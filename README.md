@@ -323,40 +323,7 @@ if tab:
 browser.disconnect()
 ```
 
-### 2. 下载博客文章
-
-```python
-from browserproxy import Browser
-import time
-
-browser = Browser()
-browser.connect()
-
-# 匹配博客标签页
-tab = browser.match(url_contains="miotsuki.cn")
-
-if tab:
-    # 点击第一篇文章
-    article = tab.ele("article a")
-    if article.exists():
-        article.click()
-
-        # 等待页面加载
-        time.sleep(2)
-
-        # 获取文章内容
-        content = tab.ele("article").text
-
-        # 保存到文件
-        with open("blog.txt", "w", encoding="utf-8") as f:
-            f.write(content)
-
-        print("文章已保存到 blog.txt")
-
-browser.disconnect()
-```
-
-### 3. 表单自动填写
+### 2. 表单自动填写
 
 ```python
 from browserproxy import Browser
