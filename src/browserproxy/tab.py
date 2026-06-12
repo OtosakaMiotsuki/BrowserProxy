@@ -486,19 +486,31 @@ class Tab:
 class Element:
     """单个元素类"""
 
-    def __init__(self, tab: Tab, selector: str):
+    def __init__(self, tab: Tab, selector: str, index: int = None, parent_selector: str = None, parent_index: int = None):
         """初始化元素
 
         Args:
             tab: 所属标签页
             selector: 选择器
+            index: 元素索引（用于区分同选择器的多个元素）
+            parent_selector: 父元素选择器（用于在特定元素内查找）
+            parent_index: 父元素索引（用于在多个父元素中指定特定的父元素）
         """
         self._tab = tab
         self._selector = selector
+        self._index = index
+        self._parent_selector = parent_selector
+        self._parent_index = parent_index
 
     def _send_command(self, action: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """发送命令"""
         cmd_params = {"selector": self._selector}
+        if self._index is not None:
+            cmd_params["index"] = self._index
+        if self._parent_selector is not None:
+            cmd_params["parentSelector"] = self._parent_selector
+        if self._parent_index is not None:
+            cmd_params["parentIndex"] = self._parent_index
         if params:
             cmd_params.update(params)
         return self._tab._send_command(action, cmd_params)
@@ -784,29 +796,81 @@ class Element:
             return [VirtualElement(self._tab, item) for item in data]
         raise Exception(f"获取子元素失败: {response.get('error')}")
 
+    # ========== 子元素查找 ==========
+
+    def ele(self, selector: str) -> "Element":
+        """在当前元素内查找单个子元素
+
+        Args:
+            selector: CSS 或 XPath 选择器
+
+        Returns:
+            Element 对象
+        """
+        return Element(
+            self._tab,
+            selector,
+            parent_selector=self._parent_selector or self._selector,
+            parent_index=self._index
+        )
+
+    def eles(self, selector: str) -> "Elements":
+        """在当前元素内查找所有匹配的子元素
+
+        Args:
+            selector: CSS 或 XPath 选择器
+
+        Returns:
+            Elements 对象
+        """
+        return Elements(
+            self._tab,
+            selector,
+            parent_selector=self._parent_selector or self._selector,
+            parent_index=self._index
+        )
+
 
 class Elements:
     """多个元素类"""
 
-    def __init__(self, tab: Tab, selector: str):
+    def __init__(self, tab: Tab, selector: str, parent_selector: str = None, parent_index: int = None):
         """初始化
 
         Args:
             tab: 所属标签页
             selector: 选择器
+            parent_selector: 父元素选择器（用于在特定元素内查找）
+            parent_index: 父元素索引（用于在多个父元素中指定特定的父元素）
         """
         self._tab = tab
         self._selector = selector
+        self._parent_selector = parent_selector
+        self._parent_index = parent_index
         self._elements: List[Element] = []
 
     def _load_elements(self) -> None:
         """加载元素列表"""
         if not self._elements:
-            response = self._tab._send_command("get_elements", {"selector": self._selector})
+            params = {"selector": self._selector}
+            if self._parent_selector:
+                params["parentSelector"] = self._parent_selector
+            if self._parent_index is not None:
+                params["parentIndex"] = self._parent_index
+            response = self._tab._send_command("get_elements", params)
             if response.get("success"):
                 count = response.get("data", [])
-                # 创建多个 Element 对象
-                self._elements = [Element(self._tab, self._selector) for _ in range(len(count))]
+                # 为每个元素创建带有索引的选择器
+                self._elements = [
+                    Element(
+                        self._tab,
+                        self._selector,
+                        index=i,
+                        parent_selector=self._parent_selector,
+                        parent_index=self._parent_index
+                    )
+                    for i in range(len(count))
+                ]
 
     def __len__(self) -> int:
         """获取元素数量"""

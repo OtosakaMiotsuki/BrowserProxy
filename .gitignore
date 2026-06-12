@@ -48,4 +48,5 @@ BrowserProxy_*.crx
 demo/douban_test/
 demo/form_test/
 demo/advanced_test/
+demo/complex_test/
 demo/movies.json

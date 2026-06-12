@@ -704,8 +704,16 @@ async function executeScript(tabId, script) {
  */
 async function executeOnTab(tabId, action, params) {
   try {
+    // 需要触发页面 JS 事件监听器的操作在主世界执行
+    const mainWorldActions = [
+      'click', 'selectOption', 'check', 'uncheck', 'hover',
+      'focus', 'blur', 'pressKey', 'drag', 'dragTo'
+    ];
+    const world = mainWorldActions.includes(action) ? 'MAIN' : 'ISOLATED';
+
     const results = await chrome.scripting.executeScript({
       target: { tabId },
+      world: world,
       func: executeDOMAction,
       args: [action, params]
     });
@@ -721,644 +729,368 @@ async function executeOnTab(tabId, action, params) {
 
 /**
  * Content Script 中执行的函数
+ * 所有 helper 必须定义在函数内部（Chrome API 序列化约束）
  */
 function executeDOMAction(action, params) {
-  const { selector } = params;
+  // ========== 共享 Helper ==========
+
+  /** 解析选择器 → { element, elements }。修复 XPath 上下文 bug。 */
+  function resolveElement(sel, ctx) {
+    if (!sel) return { element: null, elements: [] };
+    if (sel.startsWith('//') || sel.startsWith('(')) {
+      // 当 ctx 非 document 时，绝对 XPath 转相对路径以尊重上下文
+      const xpath = (ctx !== document && sel.startsWith('//')) ? '.' + sel : sel;
+      const result = document.evaluate(xpath, ctx, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+      const els = [];
+      for (let i = 0; i < result.snapshotLength; i++) els.push(result.snapshotItem(i));
+      return { element: els[0] || null, elements: els };
+    }
+    return {
+      element: ctx.querySelector(sel),
+      elements: Array.from(ctx.querySelectorAll(sel))
+    };
+  }
+
+  /** 解析父级作用域上下文 */
+  function resolveContext(p) {
+    let ps = p.parentSelector;
+    if (ps && ps.startsWith('xpath=')) ps = ps.substring(6);
+    if (!ps) return document;
+    const { element } = resolveElement(ps, document);
+    return element || document;
+  }
+
+  /** 轮询等待，3 个 wait action 共用 */
+  function poll(checkFn, timeout, interval) {
+    return new Promise(resolve => {
+      const start = Date.now();
+      const check = () => {
+        const result = checkFn();
+        if (result.resolved) { resolve(result.value); return; }
+        if (Date.now() - start > timeout) { resolve({ success: false, error: '等待超时' }); return; }
+        setTimeout(check, interval);
+      };
+      check();
+    });
+  }
+
+  /** 检查元素是否可见 */
+  function isVisible(el) {
+    if (!el) return false;
+    const s = window.getComputedStyle(el);
+    return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0'
+      && el.offsetWidth > 0 && el.offsetHeight > 0;
+  }
+
+  // ========== 主逻辑 ==========
 
   try {
-    // 查找元素
-    let element = null;
-    let elements = [];
+    // 剥离 "xpath=" 前缀
+    let selector = params.selector;
+    if (selector && selector.startsWith('xpath=')) selector = selector.substring(6);
 
-    if (selector) {
-      // 支持 CSS 和 XPath 选择器
-      if (selector.startsWith('//') || selector.startsWith('(')) {
-        const xpathResult = document.evaluate(
-          selector,
-          document,
-          null,
-          XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
-          null
-        );
-        for (let i = 0; i < xpathResult.snapshotLength; i++) {
-          elements.push(xpathResult.snapshotItem(i));
-        }
-        element = elements[0] || null;
-      } else {
-        element = document.querySelector(selector);
-        elements = Array.from(document.querySelectorAll(selector));
-      }
+    // 解析元素
+    const context = resolveContext(params);
+    let { element, elements } = resolveElement(selector, context);
+
+    // 索引选择
+    if (params.index !== undefined && params.index !== null) {
+      element = elements[params.index] || null;
     }
 
-    // ========== DOM 操作 ==========
+    /** 要求元素存在，否则抛异常（被外层 try/catch 捕获） */
+    function requireEl() {
+      if (!element) throw new Error(`元素不存在: ${selector}`);
+      return element;
+    }
+
+    // ========== 分发 ==========
 
     switch (action) {
+
+      // ----- 元素交互 -----
+
       case 'click':
-        if (!element) return { success: false, error: `元素不存在: ${selector}` };
-        element.click();
+        requireEl().click();
         return { success: true };
 
       case 'input':
-        if (!element) return { success: false, error: `元素不存在: ${selector}` };
-        element.focus();
-        element.value = params.text;
-        element.dispatchEvent(new Event('input', { bubbles: true }));
-        element.dispatchEvent(new Event('change', { bubbles: true }));
+        { const el = requireEl();
+          el.focus(); el.value = params.text;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return { success: true }; }
+
+      case 'clear':
+        { const el = requireEl();
+          el.value = '';
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return { success: true }; }
+
+      case 'hover':
+        { const el = requireEl();
+          el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+          el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+          return { success: true }; }
+
+      case 'focus':
+        requireEl().focus();
         return { success: true };
 
+      case 'blur':
+        requireEl().blur();
+        return { success: true };
+
+      case 'selectOption':
+        { const el = requireEl();
+          if (el.tagName.toLowerCase() !== 'select') return { success: false, error: '元素不是 select 标签' };
+          el.value = params.value;
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return { success: true }; }
+
+      case 'check':
+        { const el = requireEl();
+          if (el.type !== 'checkbox' && el.type !== 'radio') return { success: false, error: '元素不是 checkbox 或 radio' };
+          el.checked = true;
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return { success: true }; }
+
+      case 'uncheck':
+        { const el = requireEl();
+          if (el.type !== 'checkbox' && el.type !== 'radio') return { success: false, error: '元素不是 checkbox 或 radio' };
+          el.checked = false;
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return { success: true }; }
+
+      // ----- 元素查询 -----
+
       case 'getText':
-        if (!element) return { success: false, error: `元素不存在: ${selector}` };
-        return { success: true, data: element.textContent || '' };
+        return { success: true, data: requireEl().textContent || '' };
 
       case 'getHtml':
-        if (!element) return { success: false, error: `元素不存在: ${selector}` };
-        return { success: true, data: element.innerHTML || '' };
+        return { success: true, data: requireEl().innerHTML || '' };
 
       case 'getOuterHtml':
-        if (!element) return { success: false, error: `元素不存在: ${selector}` };
-        return { success: true, data: element.outerHTML || '' };
+        return { success: true, data: requireEl().outerHTML || '' };
 
       case 'getAttr':
-        if (!element) return { success: false, error: `元素不存在: ${selector}` };
-        return { success: true, data: element.getAttribute(params.attr) };
+        return { success: true, data: requireEl().getAttribute(params.attr) };
 
       case 'exists':
         return { success: true, data: element !== null };
 
       case 'isVisible':
-        if (!element) return { success: true, data: false };
-        const style = window.getComputedStyle(element);
-        return {
-          success: true,
-          data: style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0'
-        };
+        return { success: true, data: isVisible(element) };
 
       case 'getElements':
-        return {
-          success: true,
-          data: elements.map(el => ({
-            text: el.textContent || '',
-            html: el.innerHTML || '',
-            tagName: el.tagName.toLowerCase()
-          }))
-        };
+        return { success: true, data: elements.map(el => ({
+          text: el.textContent || '', html: el.innerHTML || '', tagName: el.tagName.toLowerCase()
+        })) };
 
       case 'getElementCount':
         return { success: true, data: elements.length };
 
       case 'scrollToElement':
-        if (!element) return { success: false, error: `元素不存在: ${selector}` };
-        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        requireEl().scrollIntoView({ behavior: 'smooth', block: 'center' });
         return { success: true };
 
       case 'getElementRect':
-        if (!element) return { success: false, error: `元素不存在: ${selector}` };
-        const rect = element.getBoundingClientRect();
-        return {
-          success: true,
-          data: {
-            x: rect.x,
-            y: rect.y,
-            width: rect.width,
-            height: rect.height,
-            top: rect.top,
-            left: rect.left,
-            bottom: rect.bottom,
-            right: rect.right
-          }
-        };
-
-      case 'hover':
-        if (!element) return { success: false, error: `元素不存在: ${selector}` };
-        const mouseEnterEvent = new MouseEvent('mouseenter', { bubbles: true });
-        const mouseOverEvent = new MouseEvent('mouseover', { bubbles: true });
-        element.dispatchEvent(mouseEnterEvent);
-        element.dispatchEvent(mouseOverEvent);
-        return { success: true };
-
-      case 'focus':
-        if (!element) return { success: false, error: `元素不存在: ${selector}` };
-        element.focus();
-        return { success: true };
-
-      case 'blur':
-        if (!element) return { success: false, error: `元素不存在: ${selector}` };
-        element.blur();
-        return { success: true };
-
-      case 'selectOption':
-        if (!element) return { success: false, error: `元素不存在: ${selector}` };
-        if (element.tagName.toLowerCase() === 'select') {
-          element.value = params.value;
-          element.dispatchEvent(new Event('change', { bubbles: true }));
-          return { success: true };
-        }
-        return { success: false, error: '元素不是 select 标签' };
-
-      case 'check':
-        if (!element) return { success: false, error: `元素不存在: ${selector}` };
-        if (element.type === 'checkbox' || element.type === 'radio') {
-          element.checked = true;
-          element.dispatchEvent(new Event('change', { bubbles: true }));
-          return { success: true };
-        }
-        return { success: false, error: '元素不是 checkbox 或 radio' };
-
-      case 'uncheck':
-        if (!element) return { success: false, error: `元素不存在: ${selector}` };
-        if (element.type === 'checkbox' || element.type === 'radio') {
-          element.checked = false;
-          element.dispatchEvent(new Event('change', { bubbles: true }));
-          return { success: true };
-        }
-        return { success: false, error: '元素不是 checkbox 或 radio' };
-
-      case 'clear':
-        if (!element) return { success: false, error: `元素不存在: ${selector}` };
-        element.value = '';
-        element.dispatchEvent(new Event('input', { bubbles: true }));
-        element.dispatchEvent(new Event('change', { bubbles: true }));
-        return { success: true };
-
-      case 'waitForElement':
-        // 等待元素出现
-        return new Promise((resolve) => {
-          const timeout = params.timeout || 10000;
-          const interval = params.interval || 100;
-          const startTime = Date.now();
-
-          const checkElement = () => {
-            let el = null;
-            if (selector.startsWith('//') || selector.startsWith('(')) {
-              const result = document.evaluate(
-                selector, document, null,
-                XPathResult.FIRST_ORDERED_NODE_TYPE, null
-              );
-              el = result.singleNodeValue;
-            } else {
-              el = document.querySelector(selector);
-            }
-
-            if (el) {
-              resolve({ success: true, data: true });
-            } else if (Date.now() - startTime > timeout) {
-              resolve({ success: false, error: '等待元素超时' });
-            } else {
-              setTimeout(checkElement, interval);
-            }
-          };
-
-          checkElement();
-        });
-
-      case 'waitForElementVisible':
-        // 等待元素可见
-        return new Promise((resolve) => {
-          const timeout = params.timeout || 10000;
-          const interval = params.interval || 100;
-          const startTime = Date.now();
-
-          const checkVisible = () => {
-            let el = null;
-            if (selector.startsWith('//') || selector.startsWith('(')) {
-              const result = document.evaluate(
-                selector, document, null,
-                XPathResult.FIRST_ORDERED_NODE_TYPE, null
-              );
-              el = result.singleNodeValue;
-            } else {
-              el = document.querySelector(selector);
-            }
-
-            if (el) {
-              const style = window.getComputedStyle(el);
-              const isVisible = style.display !== 'none' &&
-                               style.visibility !== 'hidden' &&
-                               style.opacity !== '0' &&
-                               el.offsetWidth > 0 &&
-                               el.offsetHeight > 0;
-
-              if (isVisible) {
-                resolve({ success: true, data: true });
-                return;
-              }
-            }
-
-            if (Date.now() - startTime > timeout) {
-              resolve({ success: false, error: '等待元素可见超时' });
-            } else {
-              setTimeout(checkVisible, interval);
-            }
-          };
-
-          checkVisible();
-        });
-
-      case 'waitForElementHidden':
-        // 等待元素消失
-        return new Promise((resolve) => {
-          const timeout = params.timeout || 10000;
-          const interval = params.interval || 100;
-          const startTime = Date.now();
-
-          const checkHidden = () => {
-            let el = null;
-            if (selector.startsWith('//') || selector.startsWith('(')) {
-              const result = document.evaluate(
-                selector, document, null,
-                XPathResult.FIRST_ORDERED_NODE_TYPE, null
-              );
-              el = result.singleNodeValue;
-            } else {
-              el = document.querySelector(selector);
-            }
-
-            if (!el) {
-              resolve({ success: true, data: true });
-              return;
-            }
-
-            const style = window.getComputedStyle(el);
-            const isHidden = style.display === 'none' ||
-                            style.visibility === 'hidden' ||
-                            style.opacity === '0' ||
-                            el.offsetWidth === 0 ||
-                            el.offsetHeight === 0;
-
-            if (isHidden) {
-              resolve({ success: true, data: true });
-            } else if (Date.now() - startTime > timeout) {
-              resolve({ success: false, error: '等待元素消失超时' });
-            } else {
-              setTimeout(checkHidden, interval);
-            }
-          };
-
-          checkHidden();
-        });
-
-      case 'waitForText':
-        // 等待页面包含指定文本
-        return new Promise((resolve) => {
-          const timeout = params.timeout || 10000;
-          const interval = params.interval || 100;
-          const startTime = Date.now();
-          const text = params.text;
-
-          const checkText = () => {
-            const bodyText = document.body.innerText || document.body.textContent || '';
-            if (bodyText.includes(text)) {
-              resolve({ success: true, data: true });
-            } else if (Date.now() - startTime > timeout) {
-              resolve({ success: false, error: `等待文本 "${text}" 超时` });
-            } else {
-              setTimeout(checkText, interval);
-            }
-          };
-
-          checkText();
-        });
-
-      // ========== 高级元素查找 ==========
-
-      case 'findByText':
-        // 按文本查找元素
-        {
-          const textToFind = params.text;
-          const exact = params.exact !== false;
-          const allElements = document.querySelectorAll('*');
-          const matches = [];
-
-          for (const el of allElements) {
-            const elText = el.textContent || '';
-            const match = exact ? elText.trim() === textToFind : elText.includes(textToFind);
-            if (match && el.children.length === 0) { // 叶子节点
-              matches.push({
-                tagName: el.tagName.toLowerCase(),
-                text: elText.trim(),
-                html: el.outerHTML
-              });
-            }
-          }
-
-          return { success: true, data: matches };
-        }
-
-      case 'findByAttr':
-        // 按属性查找元素
-        {
-          const attrName = params.attr;
-          const attrValue = params.value;
-          const selector = `[${attrName}="${attrValue}"]`;
-          const elements = document.querySelectorAll(selector);
-          const matches = [];
-
-          for (const el of elements) {
-            matches.push({
-              tagName: el.tagName.toLowerCase(),
-              text: el.textContent || '',
-              html: el.outerHTML
-            });
-          }
-
-          return { success: true, data: matches };
-        }
+        { const r = requireEl().getBoundingClientRect();
+          return { success: true, data: {
+            x: r.x, y: r.y, width: r.width, height: r.height,
+            top: r.top, left: r.left, bottom: r.bottom, right: r.right
+          }}; }
 
       case 'getElementParent':
-        // 获取父元素
-        if (!element) return { success: false, error: `元素不存在: ${selector}` };
-        {
-          const parent = element.parentElement;
-          if (parent) {
-            return {
-              success: true,
-              data: {
-                tagName: parent.tagName.toLowerCase(),
-                text: parent.textContent || '',
-                html: parent.outerHTML
-              }
-            };
-          }
-          return { success: true, data: null };
-        }
+        { const p = requireEl().parentElement;
+          return { success: true, data: p
+            ? { tagName: p.tagName.toLowerCase(), text: p.textContent || '', html: p.outerHTML }
+            : null }; }
 
       case 'getElementChildren':
-        // 获取子元素
-        if (!element) return { success: false, error: `元素不存在: ${selector}` };
-        {
-          const children = Array.from(element.children);
-          return {
-            success: true,
-            data: children.map(child => ({
-              tagName: child.tagName.toLowerCase(),
-              text: child.textContent || '',
-              html: child.outerHTML
-            }))
-          };
-        }
+        return { success: true, data: Array.from(requireEl().children).map(c => ({
+          tagName: c.tagName.toLowerCase(), text: c.textContent || '', html: c.outerHTML
+        })) };
 
-      // ========== 键盘操作 ==========
+      case 'findByText':
+        { const matches = [];
+          for (const el of document.querySelectorAll('*')) {
+            const t = el.textContent || '';
+            const match = params.exact !== false ? t.trim() === params.text : t.includes(params.text);
+            if (match && el.children.length === 0) {
+              matches.push({ tagName: el.tagName.toLowerCase(), text: t.trim(), html: el.outerHTML });
+            }
+          }
+          return { success: true, data: matches }; }
+
+      case 'findByAttr':
+        { const matches = [];
+          for (const el of document.querySelectorAll(`[${params.attr}="${params.value}"]`)) {
+            matches.push({ tagName: el.tagName.toLowerCase(), text: el.textContent || '', html: el.outerHTML });
+          }
+          return { success: true, data: matches }; }
+
+      // ----- 键盘 -----
 
       case 'pressKey':
-        // 按下按键
-        if (!element) return { success: false, error: `元素不存在: ${selector}` };
-        element.focus();
-        {
-          const key = params.key;
-          const modifiers = params.modifiers || [];
-
-          // 创建键盘事件
-          const keyDownEvent = new KeyboardEvent('keydown', {
-            key: key,
-            code: params.code || key,
-            bubbles: true,
-            ctrlKey: modifiers.includes('ctrl'),
-            shiftKey: modifiers.includes('shift'),
-            altKey: modifiers.includes('alt'),
-            metaKey: modifiers.includes('meta')
+        { const el = requireEl();
+          el.focus();
+          const mkEvent = (type) => new KeyboardEvent(type, {
+            key: params.key, code: params.code || params.key, bubbles: true,
+            ctrlKey: (params.modifiers || []).includes('ctrl'),
+            shiftKey: (params.modifiers || []).includes('shift'),
+            altKey: (params.modifiers || []).includes('alt'),
+            metaKey: (params.modifiers || []).includes('meta')
           });
+          el.dispatchEvent(mkEvent('keydown'));
+          el.dispatchEvent(mkEvent('keyup'));
+          return { success: true }; }
 
-          const keyUpEvent = new KeyboardEvent('keyup', {
-            key: key,
-            code: params.code || key,
-            bubbles: true,
-            ctrlKey: modifiers.includes('ctrl'),
-            shiftKey: modifiers.includes('shift'),
-            altKey: modifiers.includes('alt'),
-            metaKey: modifiers.includes('meta')
-          });
+      // ----- 等待 -----
 
-          element.dispatchEvent(keyDownEvent);
-          element.dispatchEvent(keyUpEvent);
-          return { success: true };
-        }
+      case 'waitForElement':
+        return poll(() => {
+          const { element: el } = resolveElement(selector, document);
+          return el ? { resolved: true, value: { success: true, data: true } } : { resolved: false };
+        }, params.timeout || 10000, params.interval || 100);
 
-      // ========== Cookie / Storage 操作 ==========
+      case 'waitForElementVisible':
+        return poll(() => {
+          const { element: el } = resolveElement(selector, document);
+          return el && isVisible(el) ? { resolved: true, value: { success: true, data: true } } : { resolved: false };
+        }, params.timeout || 10000, params.interval || 100);
+
+      case 'waitForElementHidden':
+        return poll(() => {
+          const { element: el } = resolveElement(selector, document);
+          if (!el) return { resolved: true, value: { success: true, data: true } };
+          const s = window.getComputedStyle(el);
+          const hidden = s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0'
+            || el.offsetWidth === 0 || el.offsetHeight === 0;
+          return hidden ? { resolved: true, value: { success: true, data: true } } : { resolved: false };
+        }, params.timeout || 10000, params.interval || 100);
+
+      case 'waitForText':
+        return poll(() => {
+          const bodyText = document.body.innerText || document.body.textContent || '';
+          return bodyText.includes(params.text)
+            ? { resolved: true, value: { success: true, data: true } } : { resolved: false };
+        }, params.timeout || 10000, params.interval || 100);
+
+      // ----- 存储 -----
 
       case 'getCookies':
-        // 获取所有 Cookie
         return { success: true, data: document.cookie };
 
       case 'getCookie':
-        // 获取指定 Cookie
-        {
-          const cookieName = params.name;
-          const cookies = document.cookie.split(';');
-          for (const cookie of cookies) {
-            const [name, value] = cookie.trim().split('=');
-            if (name === cookieName) {
-              return { success: true, data: decodeURIComponent(value || '') };
-            }
+        { for (const c of document.cookie.split(';')) {
+            const [n, v] = c.trim().split('=');
+            if (n === params.name) return { success: true, data: decodeURIComponent(v || '') };
           }
-          return { success: true, data: null };
-        }
+          return { success: true, data: null }; }
 
       case 'setCookie':
-        // 设置 Cookie
-        {
-          const { name, value, days, path, domain } = params;
-          let cookieStr = `${encodeURIComponent(name)}=${encodeURIComponent(value)}`;
-          if (days) {
-            const expires = new Date(Date.now() + days * 864e5).toUTCString();
-            cookieStr += `; expires=${expires}`;
-          }
-          if (path) cookieStr += `; path=${path}`;
-          if (domain) cookieStr += `; domain=${domain}`;
-          document.cookie = cookieStr;
-          return { success: true };
-        }
+        { let s = `${encodeURIComponent(params.name)}=${encodeURIComponent(params.value)}`;
+          if (params.days) s += `; expires=${new Date(Date.now() + params.days * 864e5).toUTCString()}`;
+          if (params.path) s += `; path=${params.path}`;
+          if (params.domain) s += `; domain=${params.domain}`;
+          document.cookie = s;
+          return { success: true }; }
 
       case 'deleteCookie':
-        // 删除 Cookie
-        {
-          const cookieName = params.name;
-          document.cookie = `${encodeURIComponent(cookieName)}=; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
-          return { success: true };
-        }
+        document.cookie = `${encodeURIComponent(params.name)}=; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+        return { success: true };
 
       case 'getLocalStorage':
-        // 获取 localStorage
-        {
-          const key = params.key;
-          if (key) {
-            const value = localStorage.getItem(key);
-            return { success: true, data: value };
-          }
-          // 获取所有
+        { const k = params.key;
+          if (k) return { success: true, data: localStorage.getItem(k) };
           const all = {};
           for (let i = 0; i < localStorage.length; i++) {
-            const k = localStorage.key(i);
-            all[k] = localStorage.getItem(k);
+            const key = localStorage.key(i); all[key] = localStorage.getItem(key);
           }
-          return { success: true, data: all };
-        }
+          return { success: true, data: all }; }
 
       case 'setLocalStorage':
-        // 设置 localStorage
-        {
-          localStorage.setItem(params.key, params.value);
-          return { success: true };
-        }
+        localStorage.setItem(params.key, params.value);
+        return { success: true };
 
       case 'deleteLocalStorage':
-        // 删除 localStorage
-        {
-          localStorage.removeItem(params.key);
-          return { success: true };
-        }
+        localStorage.removeItem(params.key);
+        return { success: true };
 
       case 'getSessionStorage':
-        // 获取 sessionStorage
-        {
-          const key = params.key;
-          if (key) {
-            const value = sessionStorage.getItem(key);
-            return { success: true, data: value };
-          }
+        { const k = params.key;
+          if (k) return { success: true, data: sessionStorage.getItem(k) };
           const all = {};
           for (let i = 0; i < sessionStorage.length; i++) {
-            const k = sessionStorage.key(i);
-            all[k] = sessionStorage.getItem(k);
+            const key = sessionStorage.key(i); all[key] = sessionStorage.getItem(key);
           }
-          return { success: true, data: all };
-        }
+          return { success: true, data: all }; }
 
       case 'setSessionStorage':
-        // 设置 sessionStorage
-        {
-          sessionStorage.setItem(params.key, params.value);
-          return { success: true };
-        }
+        sessionStorage.setItem(params.key, params.value);
+        return { success: true };
 
       case 'deleteSessionStorage':
-        // 删除 sessionStorage
-        {
-          sessionStorage.removeItem(params.key);
-          return { success: true };
-        }
+        sessionStorage.removeItem(params.key);
+        return { success: true };
 
-      // ========== iframe 操作 ==========
+      // ----- iframe -----
 
       case 'getIframes':
-        // 获取所有 iframe
-        {
-          const iframes = document.querySelectorAll('iframe');
-          const iframeList = Array.from(iframes).map((iframe, index) => ({
-            index: index,
-            src: iframe.src || '',
-            name: iframe.name || '',
-            id: iframe.id || '',
-            className: iframe.className || '',
-            width: iframe.width || iframe.offsetWidth,
-            height: iframe.height || iframe.offsetHeight
-          }));
-          return { success: true, data: iframeList };
-        }
+        return { success: true, data: Array.from(document.querySelectorAll('iframe')).map((f, i) => ({
+          index: i, src: f.src || '', name: f.name || '', id: f.id || '',
+          className: f.className || '', width: f.width || f.offsetWidth, height: f.height || f.offsetHeight
+        })) };
 
-      // ========== 拖拽 ==========
+      // ----- 拖拽 -----
 
       case 'drag':
-        // 拖拽元素
-        if (!element) return { success: false, error: `元素不存在: ${selector}` };
-        {
-          const deltaX = params.deltaX || 100;
-          const deltaY = params.deltaY || 100;
-
-          const rect = element.getBoundingClientRect();
-          const startX = rect.left + rect.width / 2;
-          const startY = rect.top + rect.height / 2;
-
-          // 触发 mousedown
-          element.dispatchEvent(new MouseEvent('mousedown', {
-            bubbles: true, clientX: startX, clientY: startY, button: 0
-          }));
-
-          // 模拟拖动过程
-          const steps = 10;
-          for (let i = 1; i <= steps; i++) {
-            const currentX = startX + (deltaX * i / steps);
-            const currentY = startY + (deltaY * i / steps);
-
+        { const el = requireEl();
+          const dx = params.deltaX || 100, dy = params.deltaY || 100;
+          const r = el.getBoundingClientRect();
+          const sx = r.left + r.width / 2, sy = r.top + r.height / 2;
+          el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: sx, clientY: sy, button: 0 }));
+          for (let i = 1; i <= 10; i++) {
             document.dispatchEvent(new MouseEvent('mousemove', {
-              bubbles: true, clientX: currentX, clientY: currentY, button: 0
+              bubbles: true, clientX: sx + dx * i / 10, clientY: sy + dy * i / 10, button: 0
             }));
           }
-
-          // 触发 mouseup
           document.dispatchEvent(new MouseEvent('mouseup', {
-            bubbles: true, clientX: startX + deltaX, clientY: startY + deltaY, button: 0
+            bubbles: true, clientX: sx + dx, clientY: sy + dy, button: 0
           }));
-
-          return { success: true };
-        }
+          return { success: true }; }
 
       case 'dragTo':
-        // 拖拽元素到目标位置
-        if (!element) return { success: false, error: `元素不存在: ${selector}` };
-        {
-          const toSelector = params.to;
-          let targetElement = null;
-
-          if (toSelector.startsWith('//') || toSelector.startsWith('(')) {
-            const result = document.evaluate(toSelector, document, null,
-              XPathResult.FIRST_ORDERED_NODE_TYPE, null);
-            targetElement = result.singleNodeValue;
-          } else {
-            targetElement = document.querySelector(toSelector);
-          }
-
-          if (!targetElement) return { success: false, error: `目标元素不存在: ${toSelector}` };
-
-          const fromRect = element.getBoundingClientRect();
-          const toRect = targetElement.getBoundingClientRect();
-
-          const startX = fromRect.left + fromRect.width / 2;
-          const startY = fromRect.top + fromRect.height / 2;
-          const endX = toRect.left + toRect.width / 2;
-          const endY = toRect.top + toRect.height / 2;
-
-          // 触发 mousedown
-          element.dispatchEvent(new MouseEvent('mousedown', {
-            bubbles: true, clientX: startX, clientY: startY, button: 0
-          }));
-
-          // 模拟拖动过程
-          const steps = 10;
-          for (let i = 1; i <= steps; i++) {
-            const currentX = startX + ((endX - startX) * i / steps);
-            const currentY = startY + ((endY - startY) * i / steps);
+        { const el = requireEl();
+          let toSel = params.to;
+          if (toSel && toSel.startsWith('xpath=')) toSel = toSel.substring(6);
+          const { element: target } = resolveElement(toSel, document);
+          if (!target) return { success: false, error: `目标元素不存在: ${params.to}` };
+          const fr = el.getBoundingClientRect(), tr = target.getBoundingClientRect();
+          const sx = fr.left + fr.width / 2, sy = fr.top + fr.height / 2;
+          const ex = tr.left + tr.width / 2, ey = tr.top + tr.height / 2;
+          el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: sx, clientY: sy, button: 0 }));
+          for (let i = 1; i <= 10; i++) {
             document.dispatchEvent(new MouseEvent('mousemove', {
-              bubbles: true, clientX: currentX, clientY: currentY, button: 0
+              bubbles: true, clientX: sx + (ex - sx) * i / 10, clientY: sy + (ey - sy) * i / 10, button: 0
             }));
           }
-
-          // 触发 mouseup
           document.dispatchEvent(new MouseEvent('mouseup', {
-            bubbles: true, clientX: endX, clientY: endY, button: 0
+            bubbles: true, clientX: ex, clientY: ey, button: 0
           }));
+          return { success: true }; }
 
-          return { success: true };
-        }
-
-      // ========== 截图 ==========
+      // ----- 页面 -----
 
       case 'screenshot':
-        // 返回截图所需的信息，实际截图通过 chrome.tabs.captureVisibleTab
-        return {
-          success: true,
-          data: {
-            url: window.location.href,
-            title: document.title,
-            width: window.innerWidth,
-            height: window.innerHeight,
-            scrollWidth: document.documentElement.scrollWidth,
-            scrollHeight: document.documentElement.scrollHeight,
-            scrollX: window.scrollX,
-            scrollY: window.scrollY
-          }
-        };
-
-      // ========== 页面操作 ==========
+        return { success: true, data: {
+          url: window.location.href, title: document.title,
+          width: window.innerWidth, height: window.innerHeight,
+          scrollWidth: document.documentElement.scrollWidth, scrollHeight: document.documentElement.scrollHeight,
+          scrollX: window.scrollX, scrollY: window.scrollY
+        } };
 
       case 'getPageHtml':
         return { success: true, data: document.documentElement.outerHTML };
