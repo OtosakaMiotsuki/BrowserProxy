@@ -61,7 +61,7 @@ cd BrowserProxy
 uv sync
 
 # 或使用 pip
-pip install -r requirements.txt
+pip install .
 ```
 
 ### 3. 安装 Chrome 扩展
@@ -141,16 +141,13 @@ tab.ele("#btn").click()           # 点击元素
 tab.ele("#input").input("hello")  # 输入文本
 text = tab.ele(".title").text     # 获取文本
 
-# 6. 执行 JavaScript
-result = tab.run_js("return document.title")
-
-# 7. 页面导航
+# 6. 页面导航
 tab.get("https://example.com")    # 跳转 URL
 tab.back()                        # 后退
 tab.forward()                     # 前进
 tab.refresh()                     # 刷新
 
-# 8. 断开连接
+# 7. 断开连接
 browser.disconnect()
 ```
 
@@ -183,8 +180,8 @@ tab.ele("button").click()            # 标签选择器
 tab.ele("#form .input").input("text") # 组合选择器
 
 # XPath 选择器
-tab.ele("//button[@type='submit']").click()
-tab.ele("//div[@class='content']").text
+tab.ele("xpath=//button[@type='submit']").click()
+tab.ele("xpath=//div[@class='content']").text
 
 # 获取属性
 href = tab.ele("a").attr("href")
@@ -195,23 +192,24 @@ if tab.ele("#btn").exists():
     tab.ele("#btn").click()
 ```
 
-### JavaScript 执行
+### 页面内容获取
 
 ```python
-# 获取页面标题
-title = tab.run_js("return document.title")
+# 获取页面文本
+text = tab.text
+
+# 获取页面 HTML
+html = tab.html
 
 # 获取当前 URL
-url = tab.run_js("return window.location.href")
+url = tab.current_url
 
-# 执行复杂逻辑
-result = tab.run_js("""
-    const elements = document.querySelectorAll('.item');
-    return elements.length;
-""")
+# 获取页面标题
+title = tab.current_title
 
-# 修改页面元素
-tab.run_js("document.querySelector('#btn').click()")
+# 获取元素属性
+href = tab.ele("a").attr("href")
+src = tab.ele("img").attr("src")
 ```
 
 ---
@@ -250,11 +248,15 @@ class Tab:
 | 方法 | 参数 | 返回值 | 说明 |
 |------|------|--------|------|
 | `ele(selector)` | `selector: str` | `Element` | 获取元素 |
+| `eles(selector)` | `selector: str` | `Elements` | 获取多个元素 |
 | `get(url)` | `url: str` | `None` | 跳转到指定 URL |
 | `back()` | - | `None` | 后退 |
 | `forward()` | - | `None` | 前进 |
 | `refresh()` | - | `None` | 刷新页面 |
-| `run_js(script)` | `script: str` | `Any` | 执行 JavaScript 代码 |
+| `html` (属性) | - | `str` | 获取页面 HTML |
+| `text` (属性) | - | `str` | 获取页面文本 |
+| `current_url` (属性) | - | `str` | 获取当前 URL |
+| `current_title` (属性) | - | `str` | 获取页面标题 |
 
 **属性：**
 - `tab_id: int` - 标签页 ID
@@ -274,9 +276,19 @@ class Element:
 |-----------|------|--------|------|
 | `click()` | - | `None` | 点击元素 |
 | `input(text)` | `text: str` | `None` | 输入文本 |
+| `clear()` | - | `None` | 清空输入框 |
+| `select(value)` | `value: str` | `None` | 选择下拉框选项 |
+| `check()` | - | `None` | 勾选复选框 |
+| `uncheck()` | - | `None` | 取消勾选 |
+| `hover()` | - | `None` | 悬停元素 |
+| `focus()` | - | `None` | 聚焦元素 |
 | `text` (属性) | - | `str` | 获取元素文本 |
+| `html` (属性) | - | `str` | 获取元素 HTML |
 | `attr(name)` | `name: str` | `Optional[str]` | 获取元素属性 |
 | `exists()` | - | `bool` | 检查元素是否存在 |
+| `is_visible()` | - | `bool` | 检查元素是否可见 |
+| `ele(selector)` | `selector: str` | `Element` | 在当前元素内查找子元素 |
+| `eles(selector)` | `selector: str` | `Elements` | 在当前元素内查找多个子元素 |
 
 ---
 
@@ -288,7 +300,7 @@ class Element:
 | CSS 类 | `.btn` | 类选择器 |
 | CSS 标签 | `button` | 标签选择器 |
 | CSS 组合 | `#form .input` | 组合选择器 |
-| XPath | `//button[@type='submit']` | XPath 选择器 |
+| XPath | `xpath=//button[@type='submit']` | XPath 选择器 |
 
 ---
 
@@ -317,7 +329,7 @@ if tab:
     time.sleep(2)
 
     # 获取搜索结果标题
-    title = tab.run_js("return document.title")
+    title = tab.current_title
     print(f"页面标题: {title}")
 
 browser.disconnect()
@@ -339,11 +351,11 @@ if tab:
     tab.ele("#password").input("mypassword")
     tab.ele("#email").input("test@example.com")
 
-    # 选择下拉框（需要 JS）
-    tab.run_js("document.querySelector('#select').value = 'option1'")
+    # 选择下拉框
+    tab.ele("#select").select("option1")
 
     # 勾选复选框
-    tab.run_js("document.querySelector('#checkbox').checked = true")
+    tab.ele("#checkbox").check()
 
     # 提交表单
     tab.ele("button[type='submit']").click()
@@ -468,8 +480,8 @@ browser.disconnect()
 
 **A:**
 1. 使用 `time.sleep()` 等待内容加载
-2. 使用 JavaScript 轮询检查元素是否存在
-3. 使用 `run_js()` 执行复杂的等待逻辑
+2. 使用 `wait_for_element(selector)` 等待元素出现
+3. 使用 `wait_for_text(text)` 等待文本出现
 
 ### Q: 可以同时控制多个浏览器吗？
 
@@ -493,7 +505,8 @@ BrowserProxy/
 │   ├── tab.py                  # Tab 和 Element 类
 │   ├── match.py                # 标签页匹配
 │   ├── ws_server.py            # WebSocket 服务端
-│   └── ws_client.py            # WebSocket 客户端
+│   ├── ws_client.py            # WebSocket 客户端
+│   └── exceptions.py           # 异常定义
 ├── extension/                  # Chrome 扩展
 │   ├── manifest.json
 │   ├── background.js           # Service Worker
@@ -502,7 +515,6 @@ BrowserProxy/
 │   └── popup.js                # 弹窗脚本
 ├── tests/                      # 单元测试
 ├── examples/                   # 示例程序
-├── demo/                       # 演示程序
 └── pyproject.toml              # 项目配置
 ```
 
@@ -535,7 +547,7 @@ uv run pytest tests/test_browser.py -v
 ### 开发依赖
 - `pytest` - 测试框架
 - `pytest-cov` - 测试覆盖率
-- `pyinstaller` - 打包成 exe（可选）
+- `DrissionPage` - 集成测试对比
 
 ---
 
