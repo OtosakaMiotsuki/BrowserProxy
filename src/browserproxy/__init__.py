@@ -113,6 +113,8 @@ def enable_logging(level: str = "INFO", fmt: str = None) -> None:
         level: 日志级别，DEBUG / INFO / WARNING / ERROR
         fmt: 自定义格式，默认: {time:HH:mm:ss} | {level} | {message}
     """
+    import sys
     if fmt is None:
         fmt = "{time:HH:mm:ss} | {level} | {message}"
-    logger.add(lambda m: print(m, end=""), level=level, format=fmt)
+    sink = lambda m: print(m, end="", file=sys.stderr)
+    logger.add(sink, level=level, format=fmt)
