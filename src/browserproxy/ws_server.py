@@ -177,7 +177,10 @@ class WebSocketServer:
         """启动服务端"""
         logger.info(f"WebSocket 服务端启动: ws://{self.host}:{self.port}")
 
-        self._server = await websockets.serve(self._handler, self.host, self.port)
+        self._server = await websockets.serve(
+            self._handler, self.host, self.port,
+            max_size=None  # 不限制消息大小，由调用方自行控制
+        )
         logger.info("等待 Chrome 扩展连接...")
 
         # 启动心跳检测
