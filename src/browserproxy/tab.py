@@ -89,6 +89,31 @@ class Tab:
         logger.debug("刷新页面")
         self._send_command("refresh")
 
+    def run_js(self, script: str) -> Any:
+        """在页面中执行 JavaScript 代码并返回结果
+
+        作为安全阀使用——当框架预封装的操作无法满足需求时，
+        直接在浏览器端执行原生 JS。越少用到说明框架封装越完善。
+
+        Args:
+            script: JavaScript 代码。用 return 返回值。
+
+        Returns:
+            JS 代码 return 的值（自动反序列化为 Python 类型）
+
+        示例:
+            # 提取所有图片 URL（浏览器端完成，不搬运 HTML）
+            urls = tab.run_js('''
+                return Array.from(document.querySelectorAll('img'))
+                    .map(img => img.src)
+            ''')
+        """
+        logger.debug(f"执行 JS: {script[:80]}...")
+        response = self._send_command("execute_script", {"script": script})
+        if response.get("success"):
+            return response.get("data")
+        raise Exception(f"JS 执行失败: {response.get('error')}")
+
     # ========== 页面内容 ==========
 
     @property
